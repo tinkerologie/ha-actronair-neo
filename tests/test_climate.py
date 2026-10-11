@@ -447,6 +447,122 @@ class TestActronZoneClimate:
         """Test maximum temperature."""
         assert zone_climate.max_temp == 30
 
+    def test_zone_bounds_all_zero_nv_limits_fall_through(
+        self, zone_climate, mock_status
+    ):
+        """Test all-zero NV_Limits variances fall through to zone_temp_variance."""
+        mock_status["main"].update(
+            {
+                "mode": "COOL",
+                "temp_setpoint_cool": 24.0,
+                "min_temp_cool": 18.0,
+                "max_temp_cool": 28.0,
+                "variance_below_cool": 0.0,
+                "variance_above_cool": 0.0,
+                "variance_below_heat": 0.0,
+                "variance_above_heat": 0.0,
+                "zone_temp_variance": 4.0,
+            }
+        )
+        assert zone_climate.min_temp == 20.0
+        assert zone_climate.max_temp == 28.0
+
+    @pytest.mark.parametrize(
+        ("main_overrides", "zone_overrides", "expected"),
+        [
+            pytest.param(
+                {"variance_below_cool": 1.0, "variance_above_cool": 2.0},
+                {},
+                (23.0, 26.0),
+                id="non_zero_signed_variance_beats_legacy",
+            ),
+            pytest.param(
+                {"variance_below_cool": -1.0, "variance_above_cool": -2.0},
+                {},
+                (23.0, 26.0),
+                id="negative_signed_variance_uses_magnitude",
+            ),
+            pytest.param(
+                {"variance_below_cool": 0.0, "variance_above_cool": 2.0},
+                {},
+                (20.0, 26.0),
+                id="mixed_zero_and_non_zero_sides",
+            ),
+            pytest.param(
+                {"variance_below_cool": -0.0, "variance_above_cool": 0.0},
+                {},
+                (20.0, 28.0),
+                id="negative_zero_treated_as_zero",
+            ),
+            pytest.param(
+                {"variance_below_cool": None, "variance_above_cool": None},
+                {},
+                (20.0, 28.0),
+                id="missing_signed_variance_uses_legacy",
+            ),
+            pytest.param(
+                {
+                    "variance_below_cool": 0.0,
+                    "variance_above_cool": 0.0,
+                    "zone_temp_variance": 0.0,
+                },
+                {},
+                (18.0, 28.0),
+                id="all_zero_falls_through_to_system_limits",
+            ),
+            pytest.param(
+                {"variance_below_cool": 1.0, "variance_above_cool": 2.0},
+                {"min_cool_setpoint": 19.0, "max_cool_setpoint": 27.0},
+                (19.0, 27.0),
+                id="explicit_zone_limits_take_priority",
+            ),
+            pytest.param(
+                {"variance_below_cool": 10.0, "variance_above_cool": 10.0},
+                {},
+                (18.0, 28.0),
+                id="clamped_to_system_limits",
+            ),
+            pytest.param(
+                {"mode": "HEAT"},
+                {},
+                (18.0, 26.0),
+                id="heat_mode_uses_heat_fields",
+            ),
+            pytest.param(
+                {"mode": "AUTO", "compressor_state": "HEAT"},
+                {},
+                (18.0, 26.0),
+                id="auto_heating_uses_heat_fields",
+            ),
+        ],
+    )
+    def test_zone_bounds_resolution(
+        self, zone_climate, mock_status, main_overrides, zone_overrides, expected
+    ):
+        """Test zone bound precedence, zero-variance fall-through and clamping."""
+        # Cool and heat fields differ so the mode-specific path is observable:
+        # cool gives 20/28 via the legacy variance, heat gives 18/26.
+        mock_status["main"].update(
+            {
+                "mode": "COOL",
+                "compressor_state": "COOL",
+                "temp_setpoint_cool": 24.0,
+                "temp_setpoint_heat": 22.0,
+                "min_temp_cool": 18.0,
+                "max_temp_cool": 28.0,
+                "min_temp_heat": 16.0,
+                "max_temp_heat": 30.0,
+                "variance_below_cool": 0.0,
+                "variance_above_cool": 0.0,
+                "variance_below_heat": 0.0,
+                "variance_above_heat": 0.0,
+                "zone_temp_variance": 4.0,
+                **main_overrides,
+            }
+        )
+        mock_status["zones"]["zone_1"].update(zone_overrides)
+        assert (zone_climate.min_temp, zone_climate.max_temp) == expected
+
     @pytest.mark.asyncio
     async def test_set_hvac_mode_off(self, zone_climate, coordinator):
         """Test disabling zone via HVAC mode."""

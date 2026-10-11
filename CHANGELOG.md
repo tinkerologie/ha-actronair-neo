@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Update repository URLs and documentation references to tinkerologie organization.
 
+### Fixed
+
+- **Zone Temperature Bounds With Zero `NV_Limits` Variances**: Zone `min_temp`/`max_temp` no longer collapse to the master setpoint when the `NV_Limits` `VarianceAboveMaster*`/`VarianceBelowMaster*` variances are `0.0`, as Neo controllers report them (#173). A zero variance now means "no constraint" for that side and falls through to `ZoneTemperatureSetpointVariance_oC`, then to the system limits. Explicit zone limits still take precedence.
+
 ## [2026.10.0] - 2026-10-08
 
 ### Added

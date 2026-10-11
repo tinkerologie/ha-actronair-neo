@@ -392,11 +392,18 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
         legacy_variance: float,
         abs_min: float,
     ) -> float:
-        """Calculate zone minimum setpoint bound."""
+        """
+        Calculate zone minimum setpoint bound.
+
+        Precedence: explicit zone minimum, then master target minus the
+        signed NV_Limits variance, then master target minus the legacy
+        variance, then the system minimum. A zero signed variance means
+        "no constraint" (Neo controllers report 0.0) and falls through.
+        """
         if zone_min is not None:
             return max(abs_min, float(zone_min))
         if isinstance(master_target, (int, float)):
-            if variance_below is not None:
+            if variance_below:
                 return max(abs_min, float(master_target) - abs(float(variance_below)))
             if legacy_variance > 0:
                 return max(abs_min, float(master_target) - legacy_variance)
@@ -410,11 +417,18 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
         legacy_variance: float,
         abs_max: float,
     ) -> float:
-        """Calculate zone maximum setpoint bound."""
+        """
+        Calculate zone maximum setpoint bound.
+
+        Precedence: explicit zone maximum, then master target plus the
+        signed NV_Limits variance, then master target plus the legacy
+        variance, then the system maximum. A zero signed variance means
+        "no constraint" (Neo controllers report 0.0) and falls through.
+        """
         if zone_max is not None:
             return min(abs_max, float(zone_max))
         if isinstance(master_target, (int, float)):
-            if variance_above is not None:
+            if variance_above:
                 return min(abs_max, float(master_target) + abs(float(variance_above)))
             if legacy_variance > 0:
                 return min(abs_max, float(master_target) + legacy_variance)
@@ -429,8 +443,10 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
            (MinHeatSetpoint/MaxHeatSetpoint in heat mode,
             MinCoolSetpoint/MaxCoolSetpoint otherwise).
         2. Master setpoint +/- NV_Limits signed variances
-           (VarianceAboveMaster*/VarianceBelowMaster*).
+           (VarianceAboveMaster*/VarianceBelowMaster*). Only non-zero
+           variances apply; zero means "no constraint".
         3. Master setpoint +/- legacy zone_temp_variance.
+        Each side (min and max) resolves independently.
         Always clamped to system min/max limits.
         """
         try:
