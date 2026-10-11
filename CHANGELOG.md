@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Update repository URLs and documentation references to tinkerologie organization.
+
 ## [2026.10.0] - 2026-10-08
 
 ### Added
