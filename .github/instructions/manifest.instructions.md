@@ -14,10 +14,10 @@ applyTo: "**/manifest.json"
   "name": "ActronAir Neo",
   "codeowners": ["@ruaan-deysel"],
   "config_flow": true,
-  "documentation": "https://github.com/ruaan-deysel/ha-actronair-neo",
+  "documentation": "https://github.com/tinkerologie/ha-actronair-neo",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/ruaan-deysel/ha-actronair-neo/issues",
+  "issue_tracker": "https://github.com/tinkerologie/ha-actronair-neo/issues",
   "requirements": ["actron-neo-api==0.4.1"],
   "version": "x.x.x"
 }

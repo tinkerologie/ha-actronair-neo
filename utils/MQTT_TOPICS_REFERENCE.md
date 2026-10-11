@@ -535,4 +535,4 @@ _LOGGER.debug("Merged state: %s", coordinator.data)
 
 **End of MQTT Topics Reference**
 
-For questions or to report issues, see the [ActronAir Neo Integration](https://github.com/ruaan-deysel/ha-actronair-neo/issues).
+For questions or to report issues, see the [ActronAir Neo Integration](https://github.com/tinkerologie/ha-actronair-neo/issues).

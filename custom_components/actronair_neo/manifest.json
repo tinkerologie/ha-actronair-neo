@@ -4,10 +4,10 @@
   "codeowners": ["@ruaan-deysel"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/ruaan-deysel/ha-actronair-neo",
+  "documentation": "https://github.com/tinkerologie/ha-actronair-neo",
   "integration_type": "device",
   "iot_class": "cloud_push",
-  "issue_tracker": "https://github.com/ruaan-deysel/ha-actronair-neo/issues",
+  "issue_tracker": "https://github.com/tinkerologie/ha-actronair-neo/issues",
   "requirements": ["aiomqtt>=2.0.0", "pydantic>=2.0.0"],
   "version": "2026.10.0"
 }

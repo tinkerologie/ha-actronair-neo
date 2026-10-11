@@ -1,9 +1,9 @@
 # ActronAir Neo Integration for Home Assistant
 
 [![HACS Integration](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)
-[![GitHub Last Commit](https://img.shields.io/github/last-commit/ruaan-deysel/ha-actronair-neo)](https://github.com/ruaan-deysel/ha-actronair-neo/commits/main)
+[![GitHub Last Commit](https://img.shields.io/github/last-commit/ruaan-deysel/ha-actronair-neo)](https://github.com/tinkerologie/ha-actronair-neo/commits/main)
 [![License](https://img.shields.io/github/license/ruaan-deysel/ha-actronair-neo)](./LICENSE)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ruaan-deysel/ha-actronair-neo)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/tinkerologie/ha-actronair-neo)
 
 The ActronAir Neo Integration enables seamless control and monitoring of your ActronAir Neo air conditioning system directly from Home Assistant. With this integration, you can automate climate control, monitor indoor and outdoor temperatures, and adjust settings based on real-time data, all from one central location.
 
@@ -21,7 +21,7 @@ The ActronAir Neo Integration enables seamless control and monitoring of your Ac
 
 ### HACS (Recommended)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ruaan-deysel&repository=ha-actronair-neo&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tinkerologie&repository=ha-actronair-neo&category=integration)
 
 ### Manual
 
@@ -69,7 +69,7 @@ If you encounter any issues:
 2. Check that your credentials are correct
 3. Ensure your ActronAir Neo system is online and accessible
 4. Check the Home Assistant logs for any error messages
-5. If you encounter a bug, please report it on our [GitHub issues page](https://github.com/ruaan-deysel/ha-actronair-neo/issues)
+5. If you encounter a bug, please report it on our [GitHub issues page](https://github.com/tinkerologie/ha-actronair-neo/issues)
 
 ## Contributing
 
@@ -80,7 +80,7 @@ Contributions to this integration are welcome. Please fork the repository and su
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/ruaan-deysel/ha-actronair-neo.git
+   git clone https://github.com/tinkerologie/ha-actronair-neo.git
    cd ha-actronair-neo
    ```
 
