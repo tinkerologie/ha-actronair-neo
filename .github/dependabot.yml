@@ -1,65 +1,70 @@
-# https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
----
+# Dependabot (tinkerologie standard: see STANDARDS.md in tinkerologie/.github)
 version: 2
 updates:
   # ── Dev Containers ──────────────────────────────────────────────────
-  - package-ecosystem: "devcontainers"
-    directory: "/"
+  - package-ecosystem: devcontainers
+    directory: /
     schedule:
-      interval: "monthly"
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
     labels:
-      - "dependencies"
+      - dependencies
     commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
-
-  # ── GitHub Actions ──────────────────────────────────────────────────
-  - package-ecosystem: "github-actions"
-    directory: "/"
+      prefix: chore(deps)
+    groups:
+      devcontainers-minor-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
     labels:
-      - "dependencies"
-      - "github-actions"
+      - dependencies
     commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
+      prefix: chore(deps)
     groups:
       actions-minor-patch:
         patterns:
-          - "*"
+          - '*'
         update-types:
-          - "minor"
-          - "patch"
+          - minor
+          - patch
 
   # ── Python (uv) ────────────────────────────────────────────────────
-  - package-ecosystem: "uv"
-    directory: "/"
+  - package-ecosystem: uv
+    directory: /
     schedule:
-      interval: "weekly"
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
     labels:
-      - "dependencies"
-      - "python"
+      - dependencies
     commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
+      prefix: chore(deps)
     groups:
       production-minor-patch:
         patterns:
-          - "homeassistant"
-          - "colorlog"
+          - homeassistant
+          - colorlog
         update-types:
-          - "minor"
-          - "patch"
+          - minor
+          - patch
       dev-minor-patch:
         patterns:
-          - "*"
+          - '*'
         exclude-patterns:
-          - "homeassistant"
-          - "colorlog"
+          - homeassistant
+          - colorlog
         update-types:
-          - "minor"
-          - "patch"
+          - minor
+          - patch
     cooldown:
       default-days: 3
       semver-major-days: 7
