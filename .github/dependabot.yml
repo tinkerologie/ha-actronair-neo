@@ -67,3 +67,22 @@ updates:
     cooldown:
       default-days: 3
       semver-major-days: 7
+
+  # Dev container base image (.devcontainer/Dockerfile).
+  - package-ecosystem: docker
+    directory: /.devcontainer
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      docker-minor-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
