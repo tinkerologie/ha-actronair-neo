@@ -294,7 +294,7 @@ jobs:
           JOB_STATUS: ${{ job.status }}
           BUILD_PACKAGE: ${{ steps.build.outputs.package }}
           BUILD_SHA256: ${{ steps.build.outputs.sha256 }}
-          VERSION_PRERELEASE_TRUE_PRE_RELEASE_STABLE_RELEASE: ${{ steps.version.outputs.prerelease == 'true' && 'Pre-release' || 'Stable release' }}
+          RELEASE_TYPE: ${{ steps.version.outputs.prerelease == 'true' && 'Pre-release' || 'Stable release' }}
         run: |
           VERSION="${VERSION_VERSION}"
 
@@ -308,7 +308,7 @@ jobs:
 
           **Release:** https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}
 
-          **Type:** ${VERSION_PRERELEASE_TRUE_PRE_RELEASE_STABLE_RELEASE}
+          **Type:** ${RELEASE_TYPE}
 
           ### 📋 Next Steps
 
