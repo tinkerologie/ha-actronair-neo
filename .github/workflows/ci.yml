@@ -14,6 +14,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # The repository tracks a .venv symlink for the dev container; keep CI's
+  # environment outside the checkout.
+  UV_PROJECT_ENVIRONMENT: /tmp/ci-venv
+
 jobs:
   lint:
     name: Lint
