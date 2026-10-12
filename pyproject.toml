@@ -7,7 +7,7 @@ name = "ha-actronair-neo"
 version = "2025.12.0"
 description = "Home Assistant integration for ActronAir Neo"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 requires-python = ">=3.14.2"
 authors = [
     {name = "Ruaan Deysel", email = "ruaan@example.com"}
@@ -15,7 +15,7 @@ authors = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [

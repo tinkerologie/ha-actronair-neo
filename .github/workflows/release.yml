@@ -21,7 +21,7 @@ jobs:
     if: startsWith(github.ref, 'refs/heads/')
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # create the GitHub release and tag
     outputs:
       tag_created: ${{ steps.create_tag.outputs.created || 'false' }}
       version: ${{ steps.manifest.outputs.version }}
@@ -32,6 +32,7 @@ jobs:
         with:
           fetch-depth: 0
 
+          persist-credentials: false
       - name: Read version from manifest
         id: manifest
         run: |
@@ -47,8 +48,10 @@ jobs:
 
       - name: Check if tag already exists
         id: check_tag
+        env:
+          MANIFEST_VERSION: ${{ steps.manifest.outputs.version }}
         run: |
-          TAG="${{ steps.manifest.outputs.version }}"
+          TAG="${MANIFEST_VERSION}"
 
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
@@ -67,21 +70,27 @@ jobs:
       - name: Create and push tag
         id: create_tag
         if: steps.check_tag.outputs.exists == 'false'
+        env:
+          MANIFEST_VERSION: ${{ steps.manifest.outputs.version }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ steps.manifest.outputs.version }}"
+          TAG="${MANIFEST_VERSION}"
           echo "Creating tag $TAG"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TAG"
           echo "created=true" >> "$GITHUB_OUTPUT"
 
       - name: Summary
+        env:
+          MANIFEST_VERSION: ${{ steps.manifest.outputs.version }}
+          CHECK_TAG_EXISTS: ${{ steps.check_tag.outputs.exists }}
         run: |
-          TAG="${{ steps.manifest.outputs.version }}"
-          if [ "${{ steps.check_tag.outputs.exists }}" = "true" ]; then
+          TAG="${MANIFEST_VERSION}"
+          if [ "${CHECK_TAG_EXISTS}" = "true" ]; then
             echo "Tag $TAG already existed. No new tag created." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "Created and pushed tag $TAG from manifest.json version." >> "$GITHUB_STEP_SUMMARY"
@@ -99,8 +108,8 @@ jobs:
 
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      id-token: write
+      contents: write # create the GitHub release and tag
+      id-token: write # trusted publishing (OIDC) to the package registry
       attestations: write
     # Run when: (1) triggered directly by a tag push, OR
     # (2) auto_tag just created a new tag in this workflow run, OR
@@ -112,14 +121,17 @@ jobs:
         with:
           fetch-depth: 0
 
+          persist-credentials: false
       - name: Extract version
         id: version
+        env:
+          AUTO_TAG_VERSION: ${{ needs.auto_tag.outputs.version }}
         run: |
           # Determine version from tag ref (direct tag push) or auto_tag output
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/}
           else
-            VERSION="${{ needs.auto_tag.outputs.version }}"
+            VERSION="${AUTO_TAG_VERSION}"
           fi
 
           if [ -z "$VERSION" ]; then
@@ -140,9 +152,11 @@ jobs:
           fi
 
       - name: Verify manifest.json version matches
+        env:
+          VERSION_VERSION: ${{ steps.version.outputs.version }}
         run: |
           MANIFEST_VERSION=$(python3 -c "import json; print(json.load(open('custom_components/actronair_neo/manifest.json'))['version'])")
-          TAG_VERSION="${{ steps.version.outputs.version }}"
+          TAG_VERSION="${VERSION_VERSION}"
 
           if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
             echo "ERROR: manifest.json version ($MANIFEST_VERSION) does not match tag ($TAG_VERSION)"
@@ -153,8 +167,10 @@ jobs:
 
       - name: Build release package
         id: build
+        env:
+          VERSION_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${VERSION_VERSION}"
           PACKAGE_FILE="actronair_neo-${VERSION}.zip"
 
           cd custom_components
@@ -185,11 +201,15 @@ jobs:
           subject-path: ${{ steps.build.outputs.package }}
 
       - name: Build release notes
+        env:
+          VERSION_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_SHA256: ${{ steps.build.outputs.sha256 }}
+          BUILD_PACKAGE: ${{ steps.build.outputs.package }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          SHA256="${{ steps.build.outputs.sha256 }}"
-          PACKAGE="${{ steps.build.outputs.package }}"
-          REPO="${{ github.repository }}"
+          VERSION="${VERSION_VERSION}"
+          SHA256="${BUILD_SHA256}"
+          PACKAGE="${BUILD_PACKAGE}"
+          REPO="${GITHUB_REPOSITORY}"
 
           # Extract version-specific notes from CHANGELOG.md
           NOTES=""
@@ -243,17 +263,20 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION_VERSION: ${{ steps.version.outputs.version }}
+          VERSION_PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          BUILD_PACKAGE: ${{ steps.build.outputs.package }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${VERSION_VERSION}"
 
           PRERELEASE_FLAG=""
-          if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then
+          if [ "${VERSION_PRERELEASE}" = "true" ]; then
             PRERELEASE_FLAG="--prerelease"
           fi
 
           # shellcheck disable=SC2086
           gh release create "${VERSION}" \
-            "${{ steps.build.outputs.package }}" \
+            "${BUILD_PACKAGE}" \
             SHA256SUM \
             CHANGELOG.md \
             --title "${VERSION}" \
@@ -263,20 +286,26 @@ jobs:
 
       - name: Release Summary
         if: always()
+        env:
+          VERSION_VERSION: ${{ steps.version.outputs.version }}
+          JOB_STATUS: ${{ job.status }}
+          BUILD_PACKAGE: ${{ steps.build.outputs.package }}
+          BUILD_SHA256: ${{ steps.build.outputs.sha256 }}
+          VERSION_PRERELEASE_TRUE_PRE_RELEASE_STABLE_RELEASE: ${{ steps.version.outputs.prerelease == 'true' && 'Pre-release' || 'Stable release' }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${VERSION_VERSION}"
 
-          if [ "${{ job.status }}" = "success" ]; then
+          if [ "${JOB_STATUS}" = "success" ]; then
             cat >> "$GITHUB_STEP_SUMMARY" << EOF
           ## 🎉 ${VERSION} Released Successfully!
 
-          **Package:** \`${{ steps.build.outputs.package }}\`
+          **Package:** \`${BUILD_PACKAGE}\`
 
-          **SHA256:** \`${{ steps.build.outputs.sha256 }}\`
+          **SHA256:** \`${BUILD_SHA256}\`
 
-          **Release:** https://github.com/${{ github.repository }}/releases/tag/${VERSION}
+          **Release:** https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}
 
-          **Type:** ${{ steps.version.outputs.prerelease == 'true' && 'Pre-release' || 'Stable release' }}
+          **Type:** ${VERSION_PRERELEASE_TRUE_PRE_RELEASE_STABLE_RELEASE}
 
           ### 📋 Next Steps
 
@@ -292,6 +321,8 @@ jobs:
           The release workflow did not complete successfully.
           Check the job logs above for details.
 
-          **Status:** ${{ job.status }}
+          **Status:** ${JOB_STATUS}
           EOF
           fi
+permissions:
+  contents: read # jobs request only what they need

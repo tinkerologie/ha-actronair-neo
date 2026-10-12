@@ -102,7 +102,7 @@ We encourage adding tests for new features. The test suite can be found in the `
 
 ## License
 
-This integration is released under the MIT License.
+This integration is released under the Apache License 2.0.
 
 ## Disclaimer
 
