@@ -1,8 +1,14 @@
 # ActronAir Neo Integration for Home Assistant
 
-[![HACS Integration](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)
-[![GitHub Last Commit](https://img.shields.io/github/last-commit/ruaan-deysel/ha-actronair-neo)](https://github.com/tinkerologie/ha-actronair-neo/commits/main)
-[![License](https://img.shields.io/github/license/ruaan-deysel/ha-actronair-neo)](./LICENSE)
+<!-- BADGES:START -->
+
+[![Marketplace and HACS](https://img.shields.io/badge/Marketplace%20%7C%20HACS-Default-orange.svg)](https://www.hacs.xyz/docs/marketplace/)
+[![GitHub Last Commit](https://img.shields.io/github/last-commit/tinkerologie/ha-actronair-neo)](https://github.com/tinkerologie/ha-actronair-neo/commits/main)
+[![GitHub Release](https://img.shields.io/github/v/release/tinkerologie/ha-actronair-neo)](https://github.com/tinkerologie/ha-actronair-neo/releases)
+[![codecov](https://codecov.io/gh/tinkerologie/ha-actronair-neo/graph/badge.svg)](https://codecov.io/gh/tinkerologie/ha-actronair-neo)
+[![License](https://img.shields.io/github/license/tinkerologie/ha-actronair-neo)](./LICENSE)
+
+<!-- BADGES:END -->
 
 The ActronAir Neo Integration enables seamless control and monitoring of your ActronAir Neo air conditioning system directly from Home Assistant. With this integration, you can automate climate control, monitor indoor and outdoor temperatures, and adjust settings based on real-time data, all from one central location.
 
