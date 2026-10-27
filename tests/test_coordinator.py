@@ -737,6 +737,7 @@ class TestCoordinatorAdditionalCoverage:
     ) -> None:
         coordinator_instance.data["main"]["fan_mode"] = "LOW+CONT"
         coordinator_instance.async_request_refresh = AsyncMock()
+        coordinator_instance.async_refresh = AsyncMock()
         mock_api.create_command = MagicMock(return_value={"cmd": "fan"})
         mock_api.send_command = AsyncMock()
         await coordinator_instance._send_fan_mode_with_retry(
@@ -1106,6 +1107,7 @@ class TestCoordinatorRemainingBranches:
         sleep_mock.assert_called_once()
 
         coordinator_instance.async_request_refresh = AsyncMock()
+        coordinator_instance.async_refresh = AsyncMock()
         coordinator_instance.data = {"main": {"fan_mode": "LOW"}}
         mock_api.create_command = MagicMock(return_value={"cmd": "fan"})
         mock_api.send_command = AsyncMock(return_value={})

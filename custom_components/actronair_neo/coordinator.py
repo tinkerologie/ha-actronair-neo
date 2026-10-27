@@ -498,7 +498,7 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         # Defensive: the parsed shape guarantees a list, but a malformed/partial
         # push could omit it. Guard kept; the type model can't see the runtime risk.
         if not isinstance(enabled_zones, list):  # pyright: ignore[reportUnnecessaryIsInstance]
-            return
+            return  # type: ignore[unreachable]
 
         now = dt.datetime.now()  # noqa: DTZ005
         resolved_zone_indexes: list[int] = []
@@ -546,7 +546,7 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         zones_data = self.last_data.get("zones")
         # Defensive guard against malformed/partial state; types say redundant.
         if not isinstance(main_data, dict) or not isinstance(zones_data, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
-            return
+            return  # type: ignore[unreachable]
 
         self._sync_zone_enabled_state(self.last_data, enabled_zones)
 
@@ -843,7 +843,8 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         if not isinstance(remote_zone_info, list):
             return zones
 
-        for i, zone_raw in enumerate(cast("list[Any]", remote_zone_info)):
+        zone_list = cast("list[Any]", remote_zone_info)  # type: ignore[redundant-cast]  # needed by pyright strict
+        for i, zone_raw in enumerate(zone_list):
             if i < MAX_ZONES and isinstance(zone_raw, dict):
                 zone = cast("dict[str, Any]", zone_raw)
                 zone_id = f"zone_{i + 1}"
@@ -1529,7 +1530,7 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         if isinstance(modes, str):
             modes = [m.strip().upper() for m in modes.split(",")]
         elif isinstance(modes, (list, tuple)):
-            items = cast("list[Any] | tuple[Any, ...]", modes)
+            items = cast("list[Any] | tuple[Any, ...]", modes)  # type: ignore[redundant-cast]  # needed by pyright strict
             modes = [str(m).strip().upper() for m in items]
 
         supported = [m for m in modes if m in valid_modes]

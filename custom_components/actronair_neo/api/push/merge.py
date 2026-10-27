@@ -142,7 +142,7 @@ def _set_path(root: dict[str, Any], path: str, value: Any) -> None:
             )
         elif idx is not None and isinstance(cur, list):
             cur = _step_list(
-                cast("list[Any]", cur),
+                cast("list[Any]", cur),  # type: ignore[redundant-cast]  # needed by pyright strict
                 idx,
                 is_last=is_last,
                 next_is_index=next_is_index,

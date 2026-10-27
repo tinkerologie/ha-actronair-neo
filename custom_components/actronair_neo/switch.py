@@ -69,11 +69,11 @@ class ActronAwayModeSwitch(ActronAirNeoEntity, SwitchEntity):
         """Return true if away mode is on."""
         return self.coordinator.data["main"]["away_mode"]
 
-    async def async_turn_on(self) -> None:
+    async def async_turn_on(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn the switch on."""
         await self.coordinator.set_away_mode(state=True)
 
-    async def async_turn_off(self) -> None:
+    async def async_turn_off(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn the switch off."""
         await self.coordinator.set_away_mode(state=False)
 
@@ -93,11 +93,11 @@ class ActronQuietModeSwitch(ActronAirNeoEntity, SwitchEntity):
         """Return true if quiet mode is on."""
         return self.coordinator.data["main"]["quiet_mode"]
 
-    async def async_turn_on(self) -> None:
+    async def async_turn_on(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn the switch on."""
         await self.coordinator.set_quiet_mode(state=True)
 
-    async def async_turn_off(self) -> None:
+    async def async_turn_off(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn the switch off."""
         await self.coordinator.set_quiet_mode(state=False)
 
@@ -117,11 +117,11 @@ class ActronTurboModeSwitch(ActronAirNeoEntity, SwitchEntity):
         """Return true if turbo mode is on."""
         return self.coordinator.data["main"].get("turbo_mode_enabled", False)
 
-    async def async_turn_on(self) -> None:
+    async def async_turn_on(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn turbo mode on."""
         await self.coordinator.set_turbo_mode(state=True)
 
-    async def async_turn_off(self) -> None:
+    async def async_turn_off(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn turbo mode off."""
         await self.coordinator.set_turbo_mode(state=False)
 
@@ -150,11 +150,11 @@ class ActronAfterHoursSwitch(ActronAirNeoEntity, SwitchEntity):
             ),
         }
 
-    async def async_turn_on(self) -> None:
+    async def async_turn_on(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn after hours timer on."""
         await self.coordinator.set_after_hours(enabled=True)
 
-    async def async_turn_off(self) -> None:
+    async def async_turn_off(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn after hours timer off."""
         await self.coordinator.set_after_hours(enabled=False)
 
@@ -175,7 +175,7 @@ class ActronContinuousFanSwitch(ActronAirNeoEntity, SwitchEntity):
         current_mode = self.coordinator.data["main"].get("fan_mode", "")
         return "+CONT" in current_mode
 
-    async def async_turn_on(self) -> None:
+    async def async_turn_on(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn the switch on."""
         # Get current fan mode and strip any existing suffixes
         current_mode = self.coordinator.data["main"].get("fan_mode", "")
@@ -200,7 +200,7 @@ class ActronContinuousFanSwitch(ActronAirNeoEntity, SwitchEntity):
         await asyncio.sleep(1)  # Short delay for API processing
         await self.coordinator.async_request_refresh()
 
-    async def async_turn_off(self) -> None:
+    async def async_turn_off(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn the switch off."""
         # Get current fan mode and strip continuous suffix
         current_mode = self.coordinator.data["main"].get("fan_mode", "")
@@ -246,6 +246,7 @@ class ActronZoneSwitch(ActronZoneEntity, SwitchEntity):
         """Initialize the zone switch."""
         zone_name = coordinator.data["zones"][zone_id]["name"]
         super().__init__(coordinator, "switch", f"Zone {zone_name}")
+        self._attr_translation_placeholders = {"zone_name": zone_name}
         self.zone_id = zone_id
         self.zone_index = int(zone_id.split("_")[1]) - 1
 
@@ -254,10 +255,10 @@ class ActronZoneSwitch(ActronZoneEntity, SwitchEntity):
         """Return true if the zone is enabled."""
         return self.coordinator.data["zones"][self.zone_id]["is_enabled"]
 
-    async def async_turn_on(self) -> None:
+    async def async_turn_on(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn the zone on."""
         await self.coordinator.set_zone_state(self.zone_index, enable=True)
 
-    async def async_turn_off(self) -> None:
+    async def async_turn_off(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Turn the zone off."""
         await self.coordinator.set_zone_state(self.zone_index, enable=False)

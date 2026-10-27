@@ -6,7 +6,7 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
-import voluptuous as vol
+import probatio
 from homeassistant.exceptions import (  # type: ignore[import-untyped]
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
@@ -74,30 +74,32 @@ type ActronAirNeoConfigEntry = ConfigEntry[ActronDataCoordinator]
 
 # ── Service schemas ─────────────────────────────────────────────
 
-SERVICE_FORCE_UPDATE_SCHEMA = vol.Schema({})
+SERVICE_FORCE_UPDATE_SCHEMA = probatio.Schema({})
 
-SERVICE_CREATE_ZONE_PRESET_SCHEMA = vol.Schema(
+SERVICE_CREATE_ZONE_PRESET_SCHEMA = probatio.Schema(
     {
-        vol.Required("device_id"): str,
-        vol.Required("name"): str,
-        vol.Optional("description", default=""): str,
+        probatio.Required("device_id"): str,
+        probatio.Required("name"): str,
+        probatio.Optional("description", default=""): str,
     }
 )
 
-SERVICE_APPLY_ZONE_PRESET_SCHEMA = vol.Schema(
+SERVICE_APPLY_ZONE_PRESET_SCHEMA = probatio.Schema(
     {
-        vol.Required("device_id"): str,
-        vol.Required("name"): str,
+        probatio.Required("device_id"): str,
+        probatio.Required("name"): str,
     }
 )
 
-SERVICE_BULK_ZONE_OPERATION_SCHEMA = vol.Schema(
+SERVICE_BULK_ZONE_OPERATION_SCHEMA = probatio.Schema(
     {
-        vol.Required("device_id"): str,
-        vol.Required("operation"): vol.In(["enable", "disable", "set_temperature"]),
-        vol.Required("zones"): list,
-        vol.Optional("temperature"): vol.Coerce(float),
-        vol.Optional("temp_key", default="temp_setpoint_cool"): str,
+        probatio.Required("device_id"): str,
+        probatio.Required("operation"): probatio.In(
+            ["enable", "disable", "set_temperature"]
+        ),
+        probatio.Required("zones"): list,
+        probatio.Optional("temperature"): probatio.Coerce(float),
+        probatio.Optional("temp_key", default="temp_setpoint_cool"): str,
     }
 )
 
@@ -389,30 +391,30 @@ def _register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_FORCE_UPDATE):
         return
 
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_FORCE_UPDATE,
-        _handle_force_update,
-        schema=SERVICE_FORCE_UPDATE_SCHEMA,
+    services = (
+        (SERVICE_FORCE_UPDATE, _handle_force_update, SERVICE_FORCE_UPDATE_SCHEMA),
+        (
+            SERVICE_CREATE_ZONE_PRESET,
+            _handle_create_zone_preset,
+            SERVICE_CREATE_ZONE_PRESET_SCHEMA,
+        ),
+        (
+            SERVICE_APPLY_ZONE_PRESET,
+            _handle_apply_zone_preset,
+            SERVICE_APPLY_ZONE_PRESET_SCHEMA,
+        ),
+        (
+            SERVICE_BULK_ZONE_OPERATION,
+            _handle_bulk_zone_operation,
+            SERVICE_BULK_ZONE_OPERATION_SCHEMA,
+        ),
     )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_CREATE_ZONE_PRESET,
-        _handle_create_zone_preset,
-        schema=SERVICE_CREATE_ZONE_PRESET_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_APPLY_ZONE_PRESET,
-        _handle_apply_zone_preset,
-        schema=SERVICE_APPLY_ZONE_PRESET_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_BULK_ZONE_OPERATION,
-        _handle_bulk_zone_operation,
-        schema=SERVICE_BULK_ZONE_OPERATION_SCHEMA,
-    )
+    for service, handler, schema in services:
+        # HA's VolSchemaType includes the unparameterised generic probatio.All,
+        # so pyright reports the method type as partially unknown.
+        hass.services.async_register(  # pyright: ignore[reportUnknownMemberType]
+            DOMAIN, service, handler, schema=schema
+        )
 
 
 def _get_coordinators(hass: HomeAssistant) -> list[ActronDataCoordinator]:

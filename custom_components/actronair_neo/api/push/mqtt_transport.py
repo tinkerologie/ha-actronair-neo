@@ -214,7 +214,8 @@ class MqttPushTransport(PushTransport):
                 raise
             except (MqttError, OSError) as err:
                 if not self._running:
-                    break
+                    # stop() clears _running from another task while we await.
+                    break  # type: ignore[unreachable]
                 self._reconnect_count += 1
                 self._last_error = type(err).__name__
                 self._state = PushState.DISCONNECTED

@@ -48,9 +48,11 @@ class ActronAirNeoEntity(CoordinatorEntity["ActronDataCoordinator"]):
             else base_unique_id
         )
 
-        # Set entity name — name_suffix becomes the entity name part.
-        # When has_entity_name is True, HA prefixes the device name automatically.
-        self._attr_name = name_suffix or None
+        # Entities with a translation_key take their name from strings.json;
+        # setting _attr_name would override it.  Others use name_suffix as
+        # the name.  HA prefixes the device name (has_entity_name is True).
+        if not getattr(self, "_attr_translation_key", None):
+            self._attr_name = name_suffix or None
 
     @property
     def device_info(self) -> DeviceInfo | None:

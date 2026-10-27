@@ -76,7 +76,6 @@ dependencies:
       - any-glob-to-any-file:
           - .python-version
           - pyproject.toml
-          - pyrightconfig.json
           - uv.lock
           - script/setup/bootstrap
           - script/test

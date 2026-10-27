@@ -332,6 +332,7 @@ class ActronZoneHumiditySensor(ActronZoneEntity, SensorEntity):
         """Initialize the zone humidity sensor."""
         zone_name = coordinator.data["zones"][zone_id]["name"]
         super().__init__(coordinator, "sensor", f"Zone {zone_name} Humidity")
+        self._attr_translation_placeholders = {"zone_name": zone_name}
         self.zone_id = zone_id
 
     @property
@@ -370,6 +371,7 @@ class ActronZoneBatterySensor(ActronZoneEntity, SensorEntity):
         """Initialize the zone battery sensor."""
         zone_name = coordinator.data["zones"][zone_id]["name"]
         super().__init__(coordinator, "sensor", f"Zone {zone_name} Battery")
+        self._attr_translation_placeholders = {"zone_name": zone_name}
         self.zone_id = zone_id
 
     @property

@@ -1182,7 +1182,7 @@ requires-dist = [
     { name = "codespell", marker = "extra == 'dev'", specifier = ">=2.4.3" },
     { name = "colorlog", marker = "extra == 'dev'", specifier = ">=6.12.0" },
     { name = "freezegun", marker = "extra == 'test'", specifier = ">=1.2.0" },
-    { name = "homeassistant", marker = "extra == 'dev'", specifier = ">=2026.7.1,<2027" },
+    { name = "homeassistant", marker = "extra == 'dev'", specifier = ">=2026.10.0,<2027" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.3.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.6.1" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.411" },
