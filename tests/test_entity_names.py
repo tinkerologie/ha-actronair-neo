@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, patch
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er
 
+from .conftest import MOCK_SERIAL
+
 _PATCH_CREATE_API = "custom_components.actronair_neo._create_api_client"
 
 
@@ -22,6 +24,11 @@ async def test_entity_names_use_translations(
     response = copy.deepcopy(mock_api_response)
     # Quiet mode off at start-up must still create the switch (#199).
     response["lastKnownState"]["UserAirconSettings"]["QuietModeEnabled"] = False
+    for zone in response["lastKnownState"]["RemoteZoneInfo"]:
+        # YourZone airflow control creates the damper cover; a sensor keyed by
+        # this entry's serial makes the zone wireless, which adds a battery.
+        zone["AirflowControlEnabled"] = True
+        zone["Sensors"] = {MOCK_SERIAL: zone["Sensors"]["TEST123456"]}
     mock_api.get_ac_status = AsyncMock(return_value=response)
     with patch(_PATCH_CREATE_API, return_value=mock_api):
         await hass.config_entries.async_setup(mock_config_entry_with_zones.entry_id)
@@ -48,6 +55,12 @@ async def test_entity_names_use_translations(
     )
     assert names["sensor.actronair_neo_zone_bedroom_humidity"] == (
         "ActronAir Neo Zone Bedroom humidity"
+    )
+    assert names["sensor.actronair_neo_zone_living_room_battery"] == (
+        "ActronAir Neo Zone Living Room battery"
+    )
+    assert names["cover.actronair_neo_bedroom_damper"] == (
+        "ActronAir Neo Bedroom damper"
     )
     assert names["binary_sensor.actronair_neo_bedroom_yourzone_enabled"] == (
         "ActronAir Neo Bedroom YourZone enabled"
