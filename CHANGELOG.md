@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.10.4] - 2026-10-27
+
 ### Fixed
 
 - The Quiet Mode switch is now created whenever the unit reports a `QuietModeEnabled` setting, whether quiet mode is on or off. Some units use `QuietModeEnabled` for the on/off state, so the switch was missing when quiet mode was off at Home Assistant start-up or when the device was added (#199).
