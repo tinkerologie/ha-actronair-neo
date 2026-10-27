@@ -51,6 +51,7 @@ updates:
       production-minor-patch:
         patterns:
           - homeassistant
+          - pytest-homeassistant-custom-component
           - colorlog
         update-types:
           - minor
@@ -60,6 +61,7 @@ updates:
           - '*'
         exclude-patterns:
           - homeassistant
+          - pytest-homeassistant-custom-component
           - colorlog
         update-types:
           - minor
@@ -67,6 +69,18 @@ updates:
     cooldown:
       default-days: 3
       semver-major-days: 7
+    # Packages pytest-homeassistant-custom-component pins exactly (==). Bumping one on
+    # its own makes the lock unsatisfiable and fails the whole update run, so they
+    # move only when pytest-homeassistant-custom-component does (STANDARDS.md §6).
+    ignore:
+      - dependency-name: freezegun
+      - dependency-name: pytest
+      - dependency-name: pytest-asyncio
+      - dependency-name: pytest-cov
+      - dependency-name: pytest-timeout
+      - dependency-name: pytest-xdist
+      - dependency-name: respx
+      - dependency-name: syrupy
 
   # Dev container base image (.devcontainer/Dockerfile).
   - package-ecosystem: docker
