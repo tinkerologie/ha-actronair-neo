@@ -58,6 +58,10 @@ include = ["custom_components*"]
 # uv will read .python-version (3.14.2) and create .venv automatically.
 # Install everything: uv sync --all-extras
 python-preference = "managed"
+# homeassistant pins Pillow==12.3.0, which has open security advisories fixed
+# in 13.0.0. Pillow is only a dev/test dependency here (the integration never
+# imports it), so override the pin until Home Assistant moves to Pillow 13.
+override-dependencies = ["pillow>=13.0.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
