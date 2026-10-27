@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Quiet Mode switch is now created whenever the unit reports a `QuietModeEnabled` setting, whether quiet mode is on or off. Some units use `QuietModeEnabled` for the on/off state, so the switch was missing when quiet mode was off at Home Assistant start-up or when the device was added (#199).
+- Single-phase Inverter units that report compressor power in watts no longer have the ×100 scaling applied (#200). On these units Compressor Power read 100× too high (for example 297,500 W instead of 2,975 W) and Compressor Energy grew 100× too fast. The integration detects the format from the first raw `CompPower` reading above 100 (10 kW after ×100, more than a single-phase compressor can draw) and remembers it across restarts. Units that report at reduced scale (#133) are unchanged. Until the first reading above 100, readings are still scaled ×100, so a short period after updating can still be inflated. Supply Voltage is now scaled ×10 only when the raw value is 100 or lower, so a unit that reports about 230 VAC no longer shows about 2,300 VAC in the diagnostics attributes. The fix corrects new readings only: Compressor Energy totals and statistics recorded before it stay inflated, so affected users should correct them with Home Assistant's statistics tools (Developer tools → Statistics → adjust sum).
+
+- Home Assistant no longer logs "Detected blocking call to listdir/read_text inside the event loop" for this integration at start-up. The MQTT client library is now imported when the integration loads, not when realtime push starts.
+
+### Changed
+
+- Diagnostics downloads include an `electrical` block with the raw outdoor-unit power, voltage and current values, the normalised values and the detected compressor power format, to help confirm scaling reports.
+- Repair flows use Home Assistant's `RepairsFlowResult` return type.
+
 ## [2026.10.3] - 2026-10-21
 
 ### Changed

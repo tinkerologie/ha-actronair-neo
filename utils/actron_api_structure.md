@@ -975,15 +975,15 @@ Based on the live API data and GitHub issue reports:
 ### Advance/Inverter (NTW-series) Telemetry Scaling
 
 NTW-series units (e.g. NTW-1000, firmware 2.6.2.5) report certain live
-telemetry fields at reduced scale in the raw API payload.  The integration
+telemetry fields at reduced scale in the raw API payload. The integration
 applies correction factors at parse time (see `const.py`):
 
-| Raw field            | Scale factor | Corrected unit | Evidence / reasoning                         |
-| -------------------- | ------------ | -------------- | -------------------------------------------- |
+| Raw field            | Scale factor | Corrected unit | Evidence / reasoning                        |
+| -------------------- | ------------ | -------------- | ------------------------------------------- |
 | `SupplyVoltage_Vac`  | × 10         | VAC            | Raw 23.0 → 230 VAC; confirmed NTW-1000 #133 |
-| `CompPower`          | × 100        | W              | Raw 45 → 4500 W; P ≈ V×I = 230×19 ≈ 4370 W |
-| `SupplyCurrentRMS_A` | × 1 (none)   | A              | Reads correctly at face value                |
-| `Capacity_kW`        | × 1 (none)   | kW             | Reads correctly at face value                |
+| `CompPower`          | × 100        | W              | Raw 45 → 4500 W; P ≈ V×I = 230×19 ≈ 4370 W  |
+| `SupplyCurrentRMS_A` | × 1 (none)   | A              | Reads correctly at face value               |
+| `Capacity_kW`        | × 1 (none)   | kW             | Reads correctly at face value               |
 
 **Three-phase exception (#189).** Three-phase Advance units report the same
 controller model (NTW-1000) and firmware, so the model can't separate the two
@@ -996,19 +996,39 @@ these units are **not** scaled:
 | `SupplyVoltage_Vac`  | × 1 (none)   | 665 – 715                         | Not confirmed as line voltage; passed through |
 | `SupplyCurrentRMS_A` | × 1 (none)   | 0.0                               | Reads 0.0 even under load                     |
 
+**Native-watt single-phase exception (#200).** Some single-phase Inverter
+units on the same controller model and firmware (NTW-1000, 2.6.2.5) report
+`CompPower` in W already (raw 2975 → 2975 W). The payload has no unit flag,
+so the integration uses magnitude:
+
+- `CompPower`: a raw value above 100 would be more than 10 kW after ×100, which
+  a single-phase compressor can't draw. The first such reading marks the system
+  as native-watt. The integration stores this per device
+  (`.storage/actronair_neo.power_format_<serial>`), so later low readings are
+  not scaled, also after a restart. Before that first reading, values of 100 or
+  lower are still scaled ×100.
+- `SupplyVoltage_Vac`: checked separately. Only raw values above 0 and at most
+  100 are scaled ×10; a raw 230 passes through unchanged.
+
+The diagnostics download shows the raw values, the normalised values and the
+detected format under `data.electrical`.
+
 > **⚠️ Unconfirmed:** `SupplyPowerRMS_W` and `OutputPowerRMS_W` scaling has
-> not yet been verified from a live payload with non-zero values.  These
+> not yet been verified from a live payload with non-zero values. These
 > fields are left unscaled pending confirmation from additional NTW-series
-> devices.  If you have a live payload showing non-zero values for these
+> devices. If you have a live payload showing non-zero values for these
 > fields, please share it in GitHub issue #133.
 
 ## Changelog
 
+- **October 2026**: Native-watt single-phase units detected by `CompPower`
+  magnitude and remembered per device; voltage scaled only when the raw value
+  is 100 or lower. See issue #200.
 - **October 2026**: Three-phase Advance units excluded from the NTW-series
   scaling; their `CompPower` is already in W. See issue #189.
 - **July 2026**: Documented NTW-series telemetry scaling for
-  `SupplyVoltage_Vac` (×10) and `CompPower` (×100).  Flagged
-  `SupplyPowerRMS_W` / `OutputPowerRMS_W` as unconfirmed.  See issue #133.
+  `SupplyVoltage_Vac` (×10) and `CompPower` (×100). Flagged
+  `SupplyPowerRMS_W` / `OutputPowerRMS_W` as unconfirmed. See issue #133.
 - **February 2026**: Complete rewrite from live API data. Documented all
   `lastKnownState` sections including serial-keyed section, SystemState,
   SystemStatus_Local, Peripherals, NV_SystemSettings. Updated auth to Device

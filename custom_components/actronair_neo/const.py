@@ -139,6 +139,18 @@ HUMIDITY_UNAVAILABLE: Final = 3000.0
 # SupplyVoltage_Vac (~665-715) is not confirmed as line voltage and passes
 # through unchanged; x 10 gave ~7000 VAC.  See GitHub issue #189.
 #
+# Native-watt single-phase units (#200).  Some single-phase Inverter units
+# on the same controller model and firmware (NTW-1000, 2.6.2.5) report
+# CompPower in W already (raw 2975 -> 2975 W, not 297,500 W).  Nothing in
+# the payload labels the format, so a magnitude ceiling decides: a
+# reduced-scale reading above 100 would be over 10 kW after x 100, which a
+# single-phase compressor cannot draw.  The first reading above the ceiling
+# latches the system as native-watt, and the latch is persisted so readings
+# stay unscaled after a restart.  Residual risk: low native-watt readings
+# taken before the first reading above the ceiling are still scaled x 100.
+# SupplyVoltage_Vac is checked independently: raw 23 (reduced) and raw 230
+# (native) cannot overlap, so only 0 < raw <= 100 is scaled x 10.
+#
 # SupplyPowerRMS_W / OutputPowerRMS_W: scaling not yet confirmed from a
 # live payload with non-zero values; left unscaled pending further data.
 # See utils/actron_api_structure.md (NTW-series Telemetry Scaling section)
@@ -148,5 +160,13 @@ SUPPLY_VOLTAGE_SCALE_FACTOR: Final = 10  # raw VAC x 10 = actual VAC (NTW-series
 COMP_POWER_SCALE_FACTOR: Final = 100  # raw W x 100 = actual W (NTW-series)
 # Lower-case Family marker for three-phase units, which are never scaled
 THREE_PHASE_FAMILY_MARKER: Final = "three phase"
+# Largest raw reduced-scale values: CompPower 100 (= 10 kW), voltage 100 (= 1000 V)
+REDUCED_SCALE_MAX_RAW_COMP_POWER: Final = 100
+REDUCED_SCALE_MAX_RAW_VOLTAGE: Final = 100
+# CompPower format of a single-phase Inverter system (persisted per device)
+POWER_FORMAT_UNRESOLVED: Final = "unresolved"
+POWER_FORMAT_NATIVE_WATT: Final = "native_watt"
+POWER_FORMAT_STORAGE_KEY: Final = f"{DOMAIN}.power_format"
+POWER_FORMAT_STORAGE_VERSION: Final = 1
 
 WATTS_PER_KILOWATT: Final = 1000  # W -> kW conversion for power display formatting

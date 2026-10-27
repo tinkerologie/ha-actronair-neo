@@ -336,3 +336,33 @@ async def test_diagnostics_push_block_live_transport(
     # Heartbeat is 2026-06-01 (older than HEARTBEAT_STALE_AFTER), so push_state
     # resolves to STALE even though the transport reports CONNECTED.
     assert push["state"] == str(PushState.STALE)
+
+
+async def test_diagnostics_includes_electrical_block(
+    hass,
+    mock_config_entry,
+    mock_api,
+    mock_ac_status_response,
+    enable_custom_integrations,
+):
+    """Diagnostics export raw and normalised electrical telemetry (#200)."""
+    mock_api.get_ac_status = AsyncMock(return_value=mock_ac_status_response)
+    with patch(_PATCH_CREATE_API, return_value=mock_api):
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    result = await async_get_config_entry_diagnostics(hass, mock_config_entry)
+    electrical = result["data"]["electrical"]
+    assert set(electrical["raw"]) == {
+        "CompPower",
+        "SupplyVoltage_Vac",
+        "SupplyCurrentRMS_A",
+        "SupplyPowerRMS_W",
+        "OutputPowerRMS_W",
+        "Capacity_kW",
+        "Family",
+        "CtrlBoardType",
+    }
+    assert set(electrical["normalised"]) == {"comp_power", "supply_voltage"}
+    assert electrical["power_format"] == "unresolved"
+    assert "Serial" not in json.dumps(electrical)

@@ -499,3 +499,25 @@ async def test_setup_entry_push_disabled_skips_discovery(
     assert coordinator.enable_push is False
     assert coordinator._push_transport is None
     mock_api.get_realtime_connection_details.assert_not_awaited()
+
+
+async def test_async_remove_entry_deletes_power_format_store(hass):
+    """Removing the entry deletes the stored compressor power format (#200)."""
+    entry = MagicMock()
+    entry.data = {"serial_number": "ABC123"}
+    with patch.object(integration, "Store") as store_cls:
+        store_cls.return_value.async_remove = AsyncMock()
+        await integration.async_remove_entry(hass, entry)
+
+    assert store_cls.call_args.args[2] == "actronair_neo.power_format_ABC123"
+    store_cls.return_value.async_remove.assert_awaited_once()
+
+
+async def test_async_remove_entry_without_serial_is_noop(hass):
+    """An entry without a serial number has no store to delete."""
+    entry = MagicMock()
+    entry.data = {}
+    with patch.object(integration, "Store") as store_cls:
+        await integration.async_remove_entry(hass, entry)
+
+    store_cls.assert_not_called()

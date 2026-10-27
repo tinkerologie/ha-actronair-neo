@@ -13,7 +13,14 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.actronair_neo.api.models import ZoneCapabilities
 from custom_components.actronair_neo.api.push.models import PushState
-from custom_components.actronair_neo.coordinator import ActronDataCoordinator
+from custom_components.actronair_neo.const import (
+    POWER_FORMAT_NATIVE_WATT,
+    POWER_FORMAT_UNRESOLVED,
+)
+from custom_components.actronair_neo.coordinator import (
+    ActronDataCoordinator,
+    _as_float,
+)
 from custom_components.actronair_neo.exceptions import (
     ApiError,
     AuthenticationError,
@@ -1775,3 +1782,193 @@ class TestOutdoorUnitScaling:
 
         assert result["comp_power"] == pytest.approx(3276.0)
         assert result["supply_voltage"] == pytest.approx(669.0)
+
+
+class TestSinglePhasePowerFormat:
+    """Native-watt single-phase Inverter units are detected and latched (#200)."""
+
+    def _make_sections(
+        self,
+        comp_power: Any = 2975,
+        voltage: Any = 240.0,
+        family: str = "Tru-Inverter",
+    ) -> dict:
+        """Build a minimal data_sections dict for _parse_outdoor_unit_data."""
+        return {
+            "live_aircon": {
+                "OutdoorUnit": {
+                    "CompPower": comp_power,
+                    "SupplyVoltage_Vac": voltage,
+                    "SupplyCurrentRMS_A": 12.4,
+                    "CompressorOn": True,
+                }
+            },
+            "aircon_system": {"OutdoorUnit": {"Family": family}},
+        }
+
+    def test_power_above_ceiling_latches_native_watt(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        """Raw 2975 is reported as 2975 W, not 297,500 W, and sets the latch."""
+        assert coordinator_instance.power_format == POWER_FORMAT_UNRESOLVED
+        with patch.object(
+            coordinator_instance._power_format_store, "async_delay_save"
+        ) as delay_save:
+            result = coordinator_instance._parse_outdoor_unit_data(
+                self._make_sections()
+            )
+
+        assert result["comp_power"] == pytest.approx(2975.0)
+        assert coordinator_instance.power_format == POWER_FORMAT_NATIVE_WATT
+        delay_save.assert_called_once()
+        assert delay_save.call_args.args[0]() == {"format": POWER_FORMAT_NATIVE_WATT}
+
+    def test_low_power_after_latch_not_scaled(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        """After the latch is set, low readings pass through as watts."""
+        coordinator_instance._power_format = POWER_FORMAT_NATIVE_WATT
+        result = coordinator_instance._parse_outdoor_unit_data(
+            self._make_sections(comp_power=60)
+        )
+
+        assert result["comp_power"] == pytest.approx(60.0)
+
+    def test_low_power_unresolved_still_scaled(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        """Without the latch, readings at or below the ceiling keep the x100."""
+        result = coordinator_instance._parse_outdoor_unit_data(
+            self._make_sections(comp_power=100, voltage=23.0)
+        )
+
+        assert result["comp_power"] == pytest.approx(10000.0)
+        assert result["supply_voltage"] == pytest.approx(230.0)
+        assert coordinator_instance.power_format == POWER_FORMAT_UNRESOLVED
+
+    def test_native_voltage_not_scaled(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        """A raw 240 VAC on an Inverter family passes through unchanged."""
+        result = coordinator_instance._parse_outdoor_unit_data(
+            self._make_sections(comp_power=0, voltage=240.0)
+        )
+
+        assert result["supply_voltage"] == pytest.approx(240.0)
+
+    def test_three_phase_does_not_latch(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        """Three-phase units pass through without touching the latch."""
+        result = coordinator_instance._parse_outdoor_unit_data(
+            self._make_sections(
+                comp_power=3276,
+                voltage=669.0,
+                family="Inverter: Advance Series I Three Phase",
+            )
+        )
+
+        assert result["comp_power"] == pytest.approx(3276.0)
+        assert coordinator_instance.power_format == POWER_FORMAT_UNRESOLVED
+
+    @pytest.mark.asyncio
+    async def test_async_setup_restores_latch(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        """A stored native-watt format is restored before the first refresh."""
+        with patch.object(
+            coordinator_instance._power_format_store,
+            "async_load",
+            AsyncMock(return_value={"format": POWER_FORMAT_NATIVE_WATT}),
+        ):
+            await coordinator_instance._async_setup()
+
+        assert coordinator_instance.power_format == POWER_FORMAT_NATIVE_WATT
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stored", [None, {}, {"format": "bogus"}])
+    async def test_async_setup_ignores_missing_or_unknown(
+        self, coordinator_instance: ActronDataCoordinator, stored: Any
+    ) -> None:
+        """Missing or unknown stored data leaves the format unresolved."""
+        with patch.object(
+            coordinator_instance._power_format_store,
+            "async_load",
+            AsyncMock(return_value=stored),
+        ):
+            await coordinator_instance._async_setup()
+
+        assert coordinator_instance.power_format == POWER_FORMAT_UNRESOLVED
+
+    @pytest.mark.asyncio
+    async def test_async_setup_load_failure_is_logged(
+        self,
+        coordinator_instance: ActronDataCoordinator,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A storage error does not block setup."""
+        with patch.object(
+            coordinator_instance._power_format_store,
+            "async_load",
+            AsyncMock(side_effect=OSError("disk")),
+        ):
+            await coordinator_instance._async_setup()
+
+        assert coordinator_instance.power_format == POWER_FORMAT_UNRESOLVED
+        assert "Failed to load the stored compressor power format" in caplog.text
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [(45, 45.0), ("23.5", 23.5), (True, None), ("n/a", None), (None, None)],
+    )
+    def test_as_float(self, value: Any, expected: float | None) -> None:
+        """Telemetry coercion rejects booleans and non-numeric values."""
+        assert _as_float(value) == expected
+
+    def test_numeric_string_values_are_coerced(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        """String telemetry is compared and scaled as a number."""
+        sections = self._make_sections(comp_power="2975", voltage="23")
+        result = coordinator_instance._parse_outdoor_unit_data(sections)
+
+        assert result["comp_power"] == pytest.approx(2975.0)
+        assert result["supply_voltage"] == pytest.approx(230.0)
+
+
+class TestQuietModeSupport:
+    """Quiet mode support comes from QuietModeEnabled's presence (#199)."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("settings", "supported", "quiet_mode"),
+        [
+            ({"QuietModeEnabled": True}, True, True),
+            ({"QuietModeEnabled": False}, True, False),
+            ({"QuietMode": True, "QuietModeEnabled": False}, True, True),
+            ({}, False, False),
+        ],
+    )
+    async def test_quiet_mode_supported(
+        self,
+        coordinator_instance: ActronDataCoordinator,
+        settings: dict[str, Any],
+        *,
+        supported: bool,
+        quiet_mode: bool,
+    ) -> None:
+        """Quiet mode being off does not hide the capability."""
+        sections = {
+            "user_aircon_settings": {"FanMode": "LOW", "Mode": "COOL", **settings},
+            "master_info": {},
+            "live_aircon": {},
+            "aircon_system": {},
+            "indoor_unit": {},
+            "alerts": {},
+            "remote_zone_info": [],
+            "peripherals": [],
+        }
+        main = await coordinator_instance._parse_main_data(sections)
+
+        assert main["quiet_mode_supported"] is supported
+        assert main["quiet_mode"] is quiet_mode

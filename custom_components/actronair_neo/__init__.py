@@ -22,6 +22,7 @@ from homeassistant.helpers import (
 from homeassistant.helpers import (
     entity_registry as er,  # type: ignore[import-untyped]
 )
+from homeassistant.helpers.storage import Store
 
 from . import repairs
 from .api import ActronAirNeoApiClient
@@ -38,12 +39,13 @@ from .const import (
     DEFAULT_REFRESH_INTERVAL,
     DOMAIN,
     PLATFORMS,
+    POWER_FORMAT_STORAGE_VERSION,
     SERVICE_APPLY_ZONE_PRESET,
     SERVICE_BULK_ZONE_OPERATION,
     SERVICE_CREATE_ZONE_PRESET,
     SERVICE_FORCE_UPDATE,
 )
-from .coordinator import ActronDataCoordinator
+from .coordinator import ActronDataCoordinator, power_format_storage_key
 from .exceptions import (
     ApiError,
     AuthenticationError,
@@ -319,6 +321,19 @@ async def async_unload_entry(
 ) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(
+    hass: HomeAssistant, entry: ActronAirNeoConfigEntry
+) -> None:
+    """Delete the stored compressor power format when the entry is removed."""
+    serial = entry.data.get(CONF_SERIAL_NUMBER)
+    if not serial:
+        return
+    store: Store[dict[str, Any]] = Store(
+        hass, POWER_FORMAT_STORAGE_VERSION, power_format_storage_key(serial)
+    )
+    await store.async_remove()
 
 
 async def async_remove_config_entry_device(
