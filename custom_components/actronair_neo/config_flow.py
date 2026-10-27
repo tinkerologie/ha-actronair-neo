@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import voluptuous as vol
+import probatio
 from homeassistant.config_entries import (
     SOURCE_REAUTH,
     SOURCE_RECONFIGURE,
@@ -240,9 +240,9 @@ class ActronairNeoConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-ar
                 return await self._async_create_device_entry(selected_device)
             errors["base"] = "device_not_found"
 
-        device_schema = vol.Schema(
+        device_schema = probatio.Schema(
             {
-                vol.Required("device"): vol.In(
+                probatio.Required("device"): probatio.In(
                     {
                         device.serial: f"{device.name} ({device.serial})"
                         for device in self._devices
@@ -386,15 +386,15 @@ class OptionsFlowHandler(OptionsFlow):
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
+            data_schema=probatio.Schema(
                 {
-                    vol.Optional(
+                    probatio.Optional(
                         CONF_ENABLE_ZONE_CONTROL,
                         default=self.config_entry.options.get(
                             CONF_ENABLE_ZONE_CONTROL, False
                         ),
                     ): bool,
-                    vol.Optional(
+                    probatio.Optional(
                         CONF_ENABLE_PUSH,
                         default=self.config_entry.options.get(
                             CONF_ENABLE_PUSH, DEFAULT_ENABLE_PUSH

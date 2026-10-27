@@ -55,6 +55,34 @@ def _redact_value(value: Any) -> Any:
     return REDACTED
 
 
+def _electrical_diagnostics(
+    coordinator: Any, ou_live: dict[str, Any], ou_system: dict[str, Any]
+) -> dict[str, Any]:
+    """Return raw and normalised outdoor-unit electrical telemetry."""
+    outdoor = coordinator.data.get("outdoor_unit", {})
+    return {
+        "raw": {
+            "CompPower": ou_live.get("CompPower", "Not Available"),
+            "SupplyVoltage_Vac": ou_live.get("SupplyVoltage_Vac", "Not Available"),
+            "SupplyCurrentRMS_A": ou_live.get(
+                "SupplyCurrentRMS_A", ou_live.get("SuppyCurrentRMS_A", "Not Available")
+            ),
+            "SupplyPowerRMS_W": ou_live.get(
+                "SupplyPowerRMS_W", ou_live.get("SuppyPowerRMS_W", "Not Available")
+            ),
+            "OutputPowerRMS_W": ou_live.get("OutputPowerRMS_W", "Not Available"),
+            "Capacity_kW": ou_system.get("Capacity_kW", "Not Available"),
+            "Family": ou_system.get("Family", "Not Available"),
+            "CtrlBoardType": ou_system.get("CtrlBoardType", "Not Available"),
+        },
+        "normalised": {
+            "comp_power": outdoor.get("comp_power", "Not Available"),
+            "supply_voltage": outdoor.get("supply_voltage", "Not Available"),
+        },
+        "power_format": getattr(coordinator, "power_format", "Not Available"),
+    }
+
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant,  # noqa: ARG001
     entry: ConfigEntry,
@@ -189,6 +217,9 @@ async def async_get_config_entry_diagnostics(
                         .get("Temperature_oC", "Not Available"),
                     },
                 },
+                "electrical": _electrical_diagnostics(
+                    coordinator, live_aircon.get("OutdoorUnit", {}), outdoor_unit
+                ),
                 "zones": {},
                 "peripherals": [],
             },

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.repairs import ConfirmRepairFlow, RepairsFlow
+from homeassistant.components.repairs import (
+    ConfirmRepairFlow,
+    RepairsFlow,
+    RepairsFlowResult,
+)
 from homeassistant.helpers.issue_registry import (
     IssueSeverity,
     async_create_issue,
@@ -16,7 +20,6 @@ from .const import DOMAIN
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
-    from homeassistant.data_entry_flow import FlowResult
 
     from .coordinator import ActronDataCoordinator
 
@@ -41,7 +44,7 @@ class ApiAuthenticationFailedRepairFlow(RepairsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, str] | None = None
-    ) -> FlowResult:
+    ) -> RepairsFlowResult:
         """Handle the initial step."""
         if user_input is not None:
             # Mark as resolved - user will need to reconfigure integration
@@ -57,7 +60,7 @@ class DeviceOfflineRepairFlow(RepairsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, str] | None = None
-    ) -> FlowResult:
+    ) -> RepairsFlowResult:
         """Handle the initial step."""
         if user_input is not None:
             return self.async_create_entry(data={})
@@ -72,7 +75,7 @@ class SensorUnavailableRepairFlow(RepairsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, str] | None = None
-    ) -> FlowResult:
+    ) -> RepairsFlowResult:
         """Handle the initial step."""
         if user_input is not None:
             return self.async_create_entry(data={})

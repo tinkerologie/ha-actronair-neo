@@ -29,7 +29,7 @@ dev = [
     # pytest-homeassistant-custom-component, which pins Home Assistant exactly and
     # ships beta-matched builds before the stable one. The bootstrap installs the
     # newest stable at runtime; this lower bound only affects uv resolution.
-    "homeassistant>=2026.7.1,<2027",
+    "homeassistant>=2026.10.0,<2027",
     "colorlog>=6.12.0",
     "pre-commit>=4.6.1",
     "pyright>=1.1.411",
@@ -58,6 +58,10 @@ include = ["custom_components*"]
 # uv will read .python-version (3.14.2) and create .venv automatically.
 # Install everything: uv sync --all-extras
 python-preference = "managed"
+# homeassistant pins Pillow==12.3.0, which has open security advisories fixed
+# in 13.0.0. Pillow is only a dev/test dependency here (the integration never
+# imports it), so override the pin until Home Assistant moves to Pillow 13.
+override-dependencies = ["pillow>=13.0.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -201,6 +205,22 @@ max-args = 10
 max-branches = 25
 max-returns = 10
 max-statements = 50
+
+[tool.pyright]
+include = ["custom_components/actronair_neo"]
+extraPaths = ["custom_components"]
+pythonVersion = "3.14"
+venvPath = ".local"
+venv = "ha-venv"
+typeCheckingMode = "strict"
+reportPrivateImportUsage = false
+reportIncompatibleMethodOverride = "error"
+# Home Assistant entities override @cached_property attributes (is_on,
+# available, extra_state_attributes, ...) with @property, which HA's
+# CachedProperties metaclass supports, and CoordinatorEntity and Entity
+# declare `available`/`device_info` differently. Pyright can't model either,
+# so every entity would warn; the rule is off rather than ignored per line.
+reportIncompatibleVariableOverride = "none"
 
 [tool.mypy]
 python_version = "3.14"

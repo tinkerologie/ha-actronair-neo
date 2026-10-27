@@ -7,6 +7,11 @@ from typing import TYPE_CHECKING
 
 from .base import PushTransport
 
+# Imported at module level so aiomqtt (a manifest requirement) loads while
+# Home Assistant imports the integration in its executor, not inside the event
+# loop when push starts, where its package metadata reads are blocking I/O.
+from .mqtt_transport import MqttPushTransport
+
 if TYPE_CHECKING:
     import ssl
 
@@ -31,9 +36,6 @@ def create_push_transport(  # noqa: PLR0913
 ) -> PushTransport | None:
     """Return a push transport for the platform, or None if unsupported."""
     if platform == "neo":
-        # Imported lazily so the aiomqtt dependency is only required when used.
-        from .mqtt_transport import MqttPushTransport  # noqa: PLC0415
-
         return MqttPushTransport(
             details=details,
             serial=serial,

@@ -69,7 +69,7 @@
         "name": "System health"
       },
       "yourzone_enabled": {
-        "name": "YourZone enabled"
+        "name": "{zone_name} YourZone enabled"
       },
       "fast_heating": {
         "name": "Fast heating"
@@ -80,7 +80,7 @@
     },
     "cover": {
       "zone_damper": {
-        "name": "Damper"
+        "name": "{zone_name} damper"
       }
     },
     "number": {
@@ -111,10 +111,10 @@
         "name": "Service reminder"
       },
       "zone_humidity": {
-        "name": "Humidity"
+        "name": "Zone {zone_name} humidity"
       },
       "zone_battery": {
-        "name": "Battery"
+        "name": "Zone {zone_name} battery"
       }
     },
     "switch": {
@@ -134,7 +134,7 @@
         "name": "After hours"
       },
       "zone": {
-        "name": "Zone"
+        "name": "Zone {zone_name}"
       }
     }
   },

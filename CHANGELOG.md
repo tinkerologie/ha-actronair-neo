@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.10.4] - 2026-10-27
+
+### Fixed
+
+- The Quiet Mode switch is now created whenever the unit reports a `QuietModeEnabled` setting, whether quiet mode is on or off. Some units use `QuietModeEnabled` for the on/off state, so the switch was missing when quiet mode was off at Home Assistant start-up or when the device was added (#199).
+- Single-phase Inverter units that report compressor power in watts no longer have the ×100 scaling applied (#200). On these units Compressor Power read 100× too high (for example 297,500 W instead of 2,975 W) and Compressor Energy grew 100× too fast. The integration detects the format from the first raw `CompPower` reading above 100 (10 kW after ×100, more than a single-phase compressor can draw) and remembers it across restarts. Units that report at reduced scale (#133) are unchanged. Until the first reading above 100, readings are still scaled ×100, so a short period after updating can still be inflated. Supply Voltage is now scaled ×10 only when the raw value is 100 or lower, so a unit that reports about 230 VAC no longer shows about 2,300 VAC in the diagnostics attributes. The fix corrects new readings only: Compressor Energy totals and statistics recorded before it stay inflated, so affected users should correct them with Home Assistant's statistics tools (Developer tools → Statistics → adjust sum).
+- Home Assistant no longer logs "Detected blocking call to listdir/read_text inside the event loop" for this integration at start-up. The MQTT client library is now imported when the integration loads, not when realtime push starts.
+
+- Entity names now come from the translation strings. A hard-coded English name overrode them, so the translations were never used. Names now follow Home Assistant's sentence case, for example "Quiet Mode" becomes "Quiet mode" and "Zone Bedroom Humidity" becomes "Zone Bedroom humidity". Entity IDs, unique IDs and names you set yourself don't change.
+
+### Changed
+
+- **Requires Home Assistant 2026.10.0 or later.** Home Assistant 2026.10 replaced the voluptuous validation library with probatio, and the integration now uses probatio directly. HACS keeps users on older Home Assistant versions on 2026.10.3.
+- Diagnostics downloads include an `electrical` block with the raw outdoor-unit power, voltage and current values, the normalised values and the detected compressor power format, to help confirm scaling reports.
+- Repair flows use Home Assistant's `RepairsFlowResult` return type, and switch `async_turn_on`/`async_turn_off` accept `**kwargs` as `ToggleEntity` defines them.
+- Development: the dev lock overrides Pillow to 13.0.0 (Home Assistant pins 12.3.0, which has open security advisories). Pyright settings moved from `pyrightconfig.json` to `pyproject.toml`. Pyright, mypy, ruff and pytest now report no errors or warnings.
+
 ## [2026.10.3] - 2026-10-21
 
 ### Changed

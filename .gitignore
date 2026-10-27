@@ -111,8 +111,9 @@ mitmproxy-ca-cert.*
 .playwright-cli/
 
 # Claude Code / AI agent tooling (local-only, not committed)
-.claude/
 
 # Superpowers AI workflow docs (plans, specs, tasks — not committed)
 superpowers/
 docs/superpowers/
+
+.env

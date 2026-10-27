@@ -117,6 +117,7 @@ class ActronZoneYourZoneEnabledSensor(ActronZoneEntity, BinarySensorEntity):
             f"{zone_name} YourZone Enabled",
             is_diagnostic=True,
         )
+        self._attr_translation_placeholders = {"zone_name": zone_name}
         self.zone_id = zone_id
         self._attr_device_class = None
 

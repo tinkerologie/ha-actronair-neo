@@ -70,6 +70,7 @@ class ActronZoneDamperCover(ActronZoneEntity, CoverEntity):
             "cover",
             f"{zone_name} Damper",
         )
+        self._attr_translation_placeholders = {"zone_name": zone_name}
         self.zone_id = zone_id
         self.zone_index = int(zone_id.split("_")[1]) - 1
 

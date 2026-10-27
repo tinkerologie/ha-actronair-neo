@@ -16,6 +16,7 @@ from homeassistant.components.climate.const import (
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,  # type: ignore[import-untyped]
 )
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import (  # type: ignore[import-untyped]
     DataUpdateCoordinator,
     UpdateFailed,
@@ -52,6 +53,12 @@ from .const import (
     NEO_SERIES_WC,
     OUTDOOR_TEMP_UNAVAILABLE,
     PARSE_CACHE_TTL,
+    POWER_FORMAT_NATIVE_WATT,
+    POWER_FORMAT_STORAGE_KEY,
+    POWER_FORMAT_STORAGE_VERSION,
+    POWER_FORMAT_UNRESOLVED,
+    REDUCED_SCALE_MAX_RAW_COMP_POWER,
+    REDUCED_SCALE_MAX_RAW_VOLTAGE,
     SUPPLY_VOLTAGE_SCALE_FACTOR,
     THREE_PHASE_FAMILY_MARKER,
     VALID_FAN_MODES,
@@ -94,6 +101,21 @@ _LOGGER = logging.getLogger(__name__)
 _QUE_BROADCAST_METADATA_KEYS: frozenset[str] = frozenset(
     {"event", "type", "wcFirmware", "correlationId", "commandResponse"}
 )
+
+
+def power_format_storage_key(device_id: str) -> str:
+    """Return the storage key for a device's persisted CompPower format."""
+    return f"{POWER_FORMAT_STORAGE_KEY}_{device_id}"
+
+
+def _as_float(value: Any) -> float | None:
+    """Return a numeric telemetry value as float, or None if not numeric."""
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _now_matching(reference: dt.datetime | None = None) -> dt.datetime:
@@ -170,6 +192,15 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         # Enhanced zone management
         self.zone_preset_manager = ZonePresetManager(hass, device_id)
 
+        # CompPower format latch for single-phase Inverter units (#200).
+        # One-directional: once native-watt, never reverts automatically.
+        self._power_format = POWER_FORMAT_UNRESOLVED
+        self._power_format_store: Store[dict[str, Any]] = Store(
+            hass,
+            POWER_FORMAT_STORAGE_VERSION,
+            power_format_storage_key(device_id),
+        )
+
         # Raw API response (private, for diagnostics only)
         self._last_raw_response: dict[str, Any] = {}
 
@@ -182,6 +213,35 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         self._cache_hit_count = 0
         self._cache_miss_count = 0
         self._last_memory_cleanup: dt.datetime | None = None
+
+    async def _async_setup(self) -> None:
+        """Load persisted state before the first refresh."""
+        try:
+            stored = await self._power_format_store.async_load()
+        except Exception:
+            _LOGGER.exception("Failed to load the stored compressor power format")
+            return
+        if stored and stored.get("format") == POWER_FORMAT_NATIVE_WATT:
+            self._power_format = POWER_FORMAT_NATIVE_WATT
+
+    @property
+    def power_format(self) -> str:
+        """Return the resolved CompPower format (unresolved or native_watt)."""
+        return self._power_format
+
+    def _latch_native_watt_power(self, raw_comp_power: float) -> None:
+        """Record that this system reports CompPower in W and persist it."""
+        self._power_format = POWER_FORMAT_NATIVE_WATT
+        self._power_format_store.async_delay_save(
+            lambda: {"format": POWER_FORMAT_NATIVE_WATT}
+        )
+        _LOGGER.info(
+            "Raw compressor power %s W is above the reduced-scale ceiling of %s; "
+            "this system reports compressor power in watts, so it will no "
+            "longer be scaled",
+            raw_comp_power,
+            REDUCED_SCALE_MAX_RAW_COMP_POWER,
+        )
 
     def validate_fan_mode(self, mode: str, *, continuous: bool = False) -> str:
         """
@@ -438,7 +498,7 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         # Defensive: the parsed shape guarantees a list, but a malformed/partial
         # push could omit it. Guard kept; the type model can't see the runtime risk.
         if not isinstance(enabled_zones, list):  # pyright: ignore[reportUnnecessaryIsInstance]
-            return
+            return  # type: ignore[unreachable]
 
         now = dt.datetime.now()  # noqa: DTZ005
         resolved_zone_indexes: list[int] = []
@@ -486,7 +546,7 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         zones_data = self.last_data.get("zones")
         # Defensive guard against malformed/partial state; types say redundant.
         if not isinstance(main_data, dict) or not isinstance(zones_data, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
-            return
+            return  # type: ignore[unreachable]
 
         self._sync_zone_enabled_state(self.last_data, enabled_zones)
 
@@ -729,7 +789,9 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
                 live_aircon.get("OutdoorUnit", {}),
             ),
             "fast_heating": user_aircon_settings.get("isFastHeating", False),
-            "quiet_mode_supported": user_aircon_settings.get("QuietModeEnabled", False),
+            # Some units report the on/off state in QuietModeEnabled (#199), so
+            # the key's presence, not its value, signals quiet mode support.
+            "quiet_mode_supported": "QuietModeEnabled" in user_aircon_settings,
             "quiet_mode_active": user_aircon_settings.get("QuietModeActive", False),
             "service_reminder_enabled": user_aircon_settings.get(
                 "ServiceReminder", {}
@@ -781,7 +843,8 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         if not isinstance(remote_zone_info, list):
             return zones
 
-        for i, zone_raw in enumerate(cast("list[Any]", remote_zone_info)):
+        zone_list = cast("list[Any]", remote_zone_info)  # type: ignore[redundant-cast]  # needed by pyright strict
+        for i, zone_raw in enumerate(zone_list):
             if i < MAX_ZONES and isinstance(zone_raw, dict):
                 zone = cast("dict[str, Any]", zone_raw)
                 zone_id = f"zone_{i + 1}"
@@ -926,16 +989,18 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         aircon_system = data_sections.get("aircon_system", {})
         ou_system = aircon_system.get("OutdoorUnit", {})
 
-        # Single-phase Inverter units report SupplyVoltage_Vac and CompPower
-        # at reduced scale (#133); other series (Classic, Aires) report
-        # engineering-unit values already.  Gate scaling to Inverter family
-        # only to prevent over-scaling on non-NTW devices (e.g. 230 VAC ->
-        # 2300 VAC on a Classic unit).  The controller model can't tell the
+        # Single-phase Inverter units can report SupplyVoltage_Vac and
+        # CompPower at reduced scale (#133); other series (Classic, Aires)
+        # report engineering-unit values already.  Only Inverter families are
+        # candidates, to prevent over-scaling on non-NTW devices (e.g. 230 VAC
+        # -> 2300 VAC on a Classic unit).  The controller model can't tell the
         # cases apart (three-phase Advance units also report NTW-1000), so
         # the Family string decides: three-phase Inverter families already
-        # report CompPower in W and pass through unscaled (#189).
+        # report CompPower in W and pass through unscaled (#189).  Some
+        # single-phase units also report W (#200), so a candidate's values
+        # are only scaled when their magnitude fits the reduced scale.
         family = ou_system.get("Family", "")
-        uses_reduced_scale = (
+        reduced_scale_candidate = (
             "Inverter" in family and THREE_PHASE_FAMILY_MARKER not in family.lower()
         )
 
@@ -947,24 +1012,37 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
             "SupplyPowerRMS_W", ou_live.get("SuppyPowerRMS_W", 0)
         )
 
-        # Apply correction factors only to reduced-scale units.  Use explicit
-        # None checks so that a genuine zero reading (e.g. compressor off) is
-        # preserved as 0 and not mistaken for a missing value.
+        # Use explicit None checks so that a genuine zero reading (e.g.
+        # compressor off) is preserved as 0 and not mistaken for a missing
+        # value.
         raw_voltage = ou_live.get("SupplyVoltage_Vac")
+        voltage_value = _as_float(raw_voltage)
         if raw_voltage is None:
             supply_voltage: float = 0
-        elif uses_reduced_scale:
-            supply_voltage = raw_voltage * SUPPLY_VOLTAGE_SCALE_FACTOR
+        elif (
+            reduced_scale_candidate
+            and voltage_value is not None
+            and 0 < voltage_value <= REDUCED_SCALE_MAX_RAW_VOLTAGE
+        ):
+            supply_voltage = voltage_value * SUPPLY_VOLTAGE_SCALE_FACTOR
         else:
             supply_voltage = raw_voltage
 
         raw_comp_power = ou_live.get("CompPower")
+        comp_power_value = _as_float(raw_comp_power)
         if raw_comp_power is None:
             comp_power: float = 0
-        elif uses_reduced_scale:
-            comp_power = raw_comp_power * COMP_POWER_SCALE_FACTOR
-        else:
+        elif (
+            not reduced_scale_candidate
+            or comp_power_value is None
+            or self._power_format == POWER_FORMAT_NATIVE_WATT
+        ):
             comp_power = raw_comp_power
+        elif comp_power_value > REDUCED_SCALE_MAX_RAW_COMP_POWER:
+            self._latch_native_watt_power(comp_power_value)
+            comp_power = raw_comp_power
+        else:
+            comp_power = comp_power_value * COMP_POWER_SCALE_FACTOR
 
         raw_outdoor = {
             "comp_power": comp_power,
@@ -1452,7 +1530,7 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         if isinstance(modes, str):
             modes = [m.strip().upper() for m in modes.split(",")]
         elif isinstance(modes, (list, tuple)):
-            items = cast("list[Any] | tuple[Any, ...]", modes)
+            items = cast("list[Any] | tuple[Any, ...]", modes)  # type: ignore[redundant-cast]  # needed by pyright strict
             modes = [str(m).strip().upper() for m in items]
 
         supported = [m for m in modes if m in valid_modes]
