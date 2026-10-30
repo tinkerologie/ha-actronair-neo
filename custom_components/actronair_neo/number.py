@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from homeassistant.components.number import NumberEntity
-from homeassistant.const import UnitOfTime
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.const import EntityCategory, UnitOfTime
 
 from .entity import ActronAirNeoEntity
 

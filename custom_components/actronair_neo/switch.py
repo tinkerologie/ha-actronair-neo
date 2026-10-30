@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.helpers.entity import EntityCategory  # type: ignore[import-untyped]
+from homeassistant.const import EntityCategory
 
 from .entity import ActronAirNeoEntity, ActronZoneEntity
 

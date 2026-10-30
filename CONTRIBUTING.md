@@ -111,6 +111,52 @@ pre-commit run --all-files
 
 ---
 
+## Home Assistant compatibility monitoring
+
+The locked test suite treats `DeprecationWarning` and
+`PendingDeprecationWarning` from `custom_components.actronair_neo` as errors.
+Third-party warnings keep pytest's default policy. An autouse fixture also fails
+on Home Assistant's three integration-specific log formats: "Detected that custom
+integration 'actronair_neo'", "The deprecated … was used from actronair_neo", and
+"custom_components.actronair_neo.module::Class provides the deprecated …".
+Import-time class-migration messages are covered by the import smoke script.
+
+**HA Next** runs weekly and on manual dispatch, independently of PR checks. The
+`pypi` channel resolves the newest compatible Home Assistant version, including
+betas, and runs tests only when a matching test harness exists. The `dev` channel
+installs Core's development branch; its harness is unavailable, so tests are
+explicitly skipped. Both channels check imports and run Hassfest against that
+channel's Core version. Failures open or update one `ha-next` + `bug` issue per
+channel; passing checks close the issue.
+
+**HA Developer Blog** scans the latest seven days weekly. Manual dispatch accepts
+a positive `days` window. Change-announcing inline code and related tables are
+matched against Python identifiers and `_attr_` attributes in the integration.
+Each matching post opens one `ha-dev-blog` + `enhancement` issue. Links are
+normalised and checked against all open and closed issues to avoid duplicates.
+Every post, including misses and fetch failures, appears in the job summary.
+Both workflows add type labels when creating issues because `GITHUB_TOKEN`
+issues do not trigger the issue-labeler or its label-based planning routing.
+
+Local commands (activate the intended Home Assistant environment first):
+
+```sh
+source .local/ha-venv/bin/activate
+script/test
+uv run --no-project --with packaging script/ha-next/resolve_versions.py
+python script/ha-next/import_check.py
+HA_VERSION=2026.11.0b0 script/hassfest
+HA_VERSION=dev script/hassfest
+uv run --no-project --with defusedxml --with beautifulsoup4 script/ha-dev-blog/scan.py --days 7 --output .ai-scratch/blog-results.json
+```
+
+The resolver prints exact HA and harness versions; it does not change the local
+HA installation. Use an isolated environment when installing those versions.
+`script/hassfest` supports both the old validator and `packages/hassfest`, repairs
+existing sparse checkouts, and refreshes `dev` to the fetched commit each run.
+The blog scanner is read-only; its separate issue-filing command requires an
+explicitly configured `GH_REPO` and an authenticated GitHub CLI.
+
 ## Commit Message Guidelines
 
 We follow Conventional Commits:

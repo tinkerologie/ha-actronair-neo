@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.components.climate import ClimateEntityFeature, HVACMode
 from homeassistant.components.climate.const import FAN_AUTO
-from homeassistant.const import ATTR_TEMPERATURE
+from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 
 from custom_components.actronair_neo.climate import (
     ActronClimate,
@@ -80,7 +80,13 @@ class TestActronClimate:
 
     def test_current_temperature(self, system_climate, mock_status):
         """Test current temperature."""
-        assert system_climate.current_temperature == 22.5
+        assert system_climate.native_current_temperature == 22.5
+        unit = (
+            system_climate.native_temperature_unit
+            if hasattr(system_climate, "native_temperature_unit")
+            else system_climate.temperature_unit
+        )
+        assert unit == UnitOfTemperature.CELSIUS
 
     def test_current_humidity(self, system_climate, mock_status):
         """Test current humidity."""
@@ -90,18 +96,18 @@ class TestActronClimate:
         """Test target temperature in COOL mode."""
         mock_status["main"]["is_on"] = True
         mock_status["main"]["mode"] = "COOL"
-        assert system_climate.target_temperature == 21.0
+        assert system_climate.native_target_temperature == 21.0
 
     def test_target_temperature_heat(self, system_climate, mock_status):
         """Test target temperature in HEAT mode."""
         mock_status["main"]["is_on"] = True
         mock_status["main"]["mode"] = "HEAT"
-        assert system_climate.target_temperature == 24.0
+        assert system_climate.native_target_temperature == 24.0
 
     def test_target_temperature_off(self, system_climate, mock_status):
         """Test target temperature when system is off (no target)."""
         mock_status["main"]["is_on"] = False
-        assert system_climate.target_temperature is None
+        assert system_climate.native_target_temperature is None
 
     def test_fan_mode(self, system_climate, mock_status):
         """Test fan mode returns mapped value."""
@@ -358,18 +364,18 @@ class TestActronZoneClimate:
 
     def test_current_temperature(self, zone_climate, mock_status):
         """Test current temperature from zone data."""
-        assert zone_climate.current_temperature == 22.0
+        assert zone_climate.native_current_temperature == 22.0
 
     def test_current_temperature_matches_zone(self, zone_climate, mock_status):
         """Test temperature updates with data."""
         mock_status["zones"]["zone_1"]["temp"] = 25.5
-        assert zone_climate.current_temperature == 25.5
+        assert zone_climate.native_current_temperature == 25.5
 
     def test_target_temperature_cool(self, zone_climate, mock_status):
         """Test target temperature in COOL mode."""
         mock_status["main"]["mode"] = "COOL"
         # Zone has temp_setpoint_cool = 24.0 from _create_mock_zone
-        assert zone_climate.target_temperature is not None
+        assert zone_climate.native_target_temperature is not None
 
     def test_zone_target_temps_with_separate_targets(self, coordinator, mock_status):
         """Test zone high/low targets when separate targets are enabled."""
@@ -378,8 +384,8 @@ class TestActronZoneClimate:
             update={"has_separate_targets": True}
         )
         climate = ActronZoneClimate(coordinator, "zone_1")
-        assert climate.target_temperature_high == 24.0
-        assert climate.target_temperature_low == 22.0
+        assert climate.native_target_temperature_high == 24.0
+        assert climate.native_target_temperature_low == 22.0
 
     def test_zone_target_temperature_auto_compressor_state(
         self, coordinator, mock_status
@@ -392,7 +398,7 @@ class TestActronZoneClimate:
         mock_status["main"]["mode"] = "AUTO"
         mock_status["main"]["compressor_state"] = "HEAT"
         climate = ActronZoneClimate(coordinator, "zone_1")
-        assert climate.target_temperature == 22.0
+        assert climate.native_target_temperature == 22.0
 
     def test_zone_target_temperature_auto_cool_state(self, coordinator, mock_status):
         """Test AUTO target resolution when compressor state is COOL."""
@@ -403,7 +409,7 @@ class TestActronZoneClimate:
         mock_status["main"]["mode"] = "AUTO"
         mock_status["main"]["compressor_state"] = "COOL"
         climate = ActronZoneClimate(coordinator, "zone_1")
-        assert climate.target_temperature == 24.0
+        assert climate.native_target_temperature == 24.0
 
     def test_zone_target_temperature_no_temp_control(self, coordinator, mock_status):
         """Test target temperature returns None when temp control unsupported."""
@@ -412,7 +418,7 @@ class TestActronZoneClimate:
             update={"has_temp_control": False}
         )
         climate = ActronZoneClimate(coordinator, "zone_1")
-        assert climate.target_temperature is None
+        assert climate.native_target_temperature is None
 
     def test_zone_target_temperature_exception_path(self, coordinator, mock_status):
         """Test target temperature handles key/type errors gracefully."""
@@ -423,7 +429,7 @@ class TestActronZoneClimate:
         del mock_status["zones"]["zone_1"]["temp_setpoint_cool"]
         mock_status["main"]["mode"] = "COOL"
         climate = ActronZoneClimate(coordinator, "zone_1")
-        assert climate.target_temperature is None
+        assert climate.native_target_temperature is None
 
     def test_resolve_zone_target_temp_heat_and_auto_unknown(self, coordinator):
         """Test _resolve_zone_target_temp heat branch and auto unknown fallback."""
@@ -436,8 +442,8 @@ class TestActronZoneClimate:
 
     def test_target_high_low_none_when_no_separate_targets(self, zone_climate):
         """Test target high/low are None without separate-target support."""
-        assert zone_climate.target_temperature_high is None
-        assert zone_climate.target_temperature_low is None
+        assert zone_climate.native_target_temperature_high is None
+        assert zone_climate.native_target_temperature_low is None
 
     def test_min_temp(self, zone_climate):
         """Test minimum temperature."""

@@ -9,7 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Deprecation checks fail CI for Python warnings and Home Assistant deprecation logs attributed to this integration. Weekly HA Next checks the newest PyPI release (including betas) and Core `dev`, with one tracked issue per failing channel. A weekly developer-blog watcher files deduplicated enhancement issues when change announcements name identifiers used by the integration (#210).
+
 ### Changed
+
+- Climate entities expose native temperature properties on Home Assistant 2026.11+, preserving Celsius reporting on 2026.10 through conditional legacy aliases. Entity categories use the canonical Home Assistant import. Local Hassfest validation supports the new `packages/hassfest` layout and refreshes Core `dev` on each run (#210).
 
 - HACS and the Marketplace install the fixed-name `actronair_neo.zip` release asset, enabling asset download counts. Integration files are at the ZIP root; `SHA256SUMS` accompanies the reproducible archive. Releases separate attested builds from verified publication, publish through a draft, and verify release immutability. Selecting older releases without this asset can fail to download (#209).
 

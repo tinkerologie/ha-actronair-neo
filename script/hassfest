@@ -6,7 +6,8 @@
 # using hassfest from the Home Assistant Core repository.
 #
 # On first run, clones HA Core (~27 MB) to .local/ha-core
-# Subsequent runs reuse the cached version (use --update to force an update).
+# Subsequent runs reuse tagged versions; dev refreshes to FETCH_HEAD each run.
+# Core 2026.11+ uses the editable packages/hassfest validator with Core metadata.
 #
 # Usage:
 #   ./script/hassfest [options]
@@ -32,6 +33,21 @@ source "$SCRIPT_DIR/.lib/output.sh"
 HA_CORE_DIR=".local/ha-core"
 HA_CORE_REPO="https://github.com/home-assistant/core.git"
 INTEGRATION_PATH="custom_components/actronair_neo"
+
+# Activate virtual environment
+if [[ -z ${VIRTUAL_ENV:-} ]]; then
+    log_info "Activating virtual environment"
+    # shellcheck source=/dev/null
+    if [[ -f "$PWD/.local/ha-venv/bin/activate" ]]; then
+        source "$PWD/.local/ha-venv/bin/activate"
+    elif [[ -f "$HOME/.local/ha-venv/bin/activate" ]]; then
+        source "$HOME/.local/ha-venv/bin/activate"
+    else
+        log_error "Virtual environment not found"
+        log_info "Run: ./script/setup/bootstrap"
+        exit 1
+    fi
+fi
 
 # Detect Home Assistant version to use
 if [ -n "${HA_VERSION:-}" ]; then
@@ -69,67 +85,30 @@ done
 log_header "Home Assistant hassfest validation"
 log_info "Target version: $HA_VERSION_TAG"
 
-# Check if HA Core is already cloned
-if [ ! -d "$HA_CORE_DIR" ]; then
-    log_info "Cloning Home Assistant Core (sparse checkout, ~5 MB)..."
-
-    # Initialize sparse checkout to only get script/ directory
+# Configure both old and new layouts, including existing sparse-checkout caches.
+if [ ! -d "$HA_CORE_DIR/.git" ]; then
     mkdir -p "$HA_CORE_DIR"
-    cd "$HA_CORE_DIR"
-    git init >/dev/null 2>&1
-    git remote add origin "$HA_CORE_REPO"
-    git config core.sparseCheckout true
-
-    # Only checkout script/ and homeassistant/ directories (needed for hassfest)
-    echo "script/" > .git/info/sparse-checkout
-    echo "homeassistant/" >> .git/info/sparse-checkout
-
-    # Fetch the specific version (shallow clone + blobless for minimal size)
-    if [ "$HA_VERSION_TAG" = "dev" ]; then
-        git fetch --depth 1 --filter=blob:none origin dev 2>&1 | grep -E "(Receiving|Resolving|Fetching)" || true
-        git checkout dev >/dev/null 2>&1
-    else
-        git fetch --depth 1 --filter=blob:none origin tag "$HA_VERSION_TAG" 2>&1 | grep -E "(Receiving|Resolving|Fetching)" || true
-        git checkout "$HA_VERSION_TAG" >/dev/null 2>&1
-    fi
-    cd - >/dev/null
-    echo ""
-else
-    # Check if we need to update to match current HA version
-    cd "$HA_CORE_DIR"
-    CURRENT_VERSION=$(git describe --tags --exact-match 2>/dev/null || git rev-parse --abbrev-ref HEAD)
-    cd - >/dev/null
-
-    if [ "$UPDATE_CORE" = true ] || [ "$CURRENT_VERSION" != "$HA_VERSION_TAG" ]; then
-        log_info "Updating to version $HA_VERSION_TAG..."
-        cd "$HA_CORE_DIR"
-        if [ "$HA_VERSION_TAG" = "dev" ]; then
-            git fetch --depth 1 --filter=blob:none origin dev >/dev/null 2>&1
-            git checkout dev >/dev/null 2>&1
-        else
-            git fetch --depth 1 --filter=blob:none origin tag "$HA_VERSION_TAG" >/dev/null 2>&1
-            git checkout "$HA_VERSION_TAG" >/dev/null 2>&1
-        fi
-        cd - >/dev/null
-    else
-        log_info "Using cached version $CURRENT_VERSION"
-    fi
+    git -C "$HA_CORE_DIR" init >/dev/null
+    git -C "$HA_CORE_DIR" remote add origin "$HA_CORE_REPO"
+    git -C "$HA_CORE_DIR" config core.sparseCheckout true
 fi
-
-# Activate virtual environment
-if [[ -z ${VIRTUAL_ENV:-} ]]; then
-    log_info "Activating virtual environment"
-    # shellcheck source=/dev/null
-    if [[ -f "$PWD/.local/ha-venv/bin/activate" ]]; then
-        source "$PWD/.local/ha-venv/bin/activate"
-    elif [[ -f "$HOME/.local/ha-venv/bin/activate" ]]; then
-        source "$HOME/.local/ha-venv/bin/activate"
-    else
-        log_error "Virtual environment not found"
-        log_info "Run: ./script/setup/bootstrap"
-        exit 1
+SPARSE_FILE="$HA_CORE_DIR/.git/info/sparse-checkout"
+for pattern in /script/ /homeassistant/ /packages/hassfest/ /pyproject.toml; do
+    if ! grep -qxF "$pattern" "$SPARSE_FILE" 2>/dev/null; then
+        echo "$pattern" >> "$SPARSE_FILE"
     fi
+done
+CURRENT_VERSION=$(git -C "$HA_CORE_DIR" describe --tags --exact-match 2>/dev/null || true)
+if [ "$UPDATE_CORE" = true ] || [ "$HA_VERSION_TAG" = dev ] || [ "$CURRENT_VERSION" != "$HA_VERSION_TAG" ]; then
+    log_info "Fetching $HA_VERSION_TAG..."
+    if [ "$HA_VERSION_TAG" = dev ]; then
+        git -C "$HA_CORE_DIR" fetch --depth 1 --filter=blob:none origin dev
+    else
+        git -C "$HA_CORE_DIR" fetch --depth 1 --filter=blob:none origin "refs/tags/$HA_VERSION_TAG:refs/tags/$HA_VERSION_TAG"
+    fi
+    git -C "$HA_CORE_DIR" checkout --detach FETCH_HEAD >/dev/null
 fi
+git -C "$HA_CORE_DIR" read-tree -mu HEAD
 
 # Check if we have required dependencies
 log_info "Checking dependencies..."
@@ -148,6 +127,26 @@ HASSFEST_CMD=(
     --action validate
     --integration-path "$PWD/$INTEGRATION_PATH"
 )
+
+if [ -f "$HA_CORE_DIR/packages/hassfest/pyproject.toml" ]; then
+    CORE_ABSOLUTE="$(cd "$HA_CORE_DIR" && pwd)"
+    HASSFEST_CMD=(
+        uv run --no-project --python "$(command -v python3)"
+        --with tqdm
+        --with-editable "$CORE_ABSOLUTE/packages/hassfest"
+        "${HASSFEST_CMD[@]}"
+    )
+elif [ -f "$HA_CORE_DIR/homeassistant/components/infrared/manifest.json" ]; then
+    # The legacy validator imports infrared's device classes, an optional HA dependency.
+    INFRARED_REQUIREMENT=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["requirements"][0])' \
+        "$HA_CORE_DIR/homeassistant/components/infrared/manifest.json")
+    HASSFEST_CMD=(
+        uv run --no-project --python "$(command -v python3)"
+        --with tqdm
+        --with "$INFRARED_REQUIREMENT"
+        "${HASSFEST_CMD[@]}"
+    )
+fi
 
 # Add skip-plugins if specified
 if [ -n "$SKIP_PLUGINS" ]; then

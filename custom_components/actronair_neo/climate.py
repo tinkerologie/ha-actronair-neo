@@ -44,6 +44,9 @@ if TYPE_CHECKING:
 
 PARALLEL_UPDATES = 0
 
+# HA 2026.11 introduced native climate temperatures; 2026.10 reads legacy names.
+_HAS_NATIVE_TEMPERATURES = hasattr(ClimateEntity, "native_current_temperature")
+
 _LOGGER = logging.getLogger(__name__)
 
 BASE_HVAC_MODES = [
@@ -99,6 +102,11 @@ async def async_setup_entry(
 class ActronClimate(ActronAirNeoEntity, ClimateEntity):
     """Main climate entity with model-aware fan modes."""
 
+    if _HAS_NATIVE_TEMPERATURES:
+        _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
+    else:
+        _attr_temperature_unit = UnitOfTemperature.CELSIUS
+
     def __init__(self, coordinator: ActronDataCoordinator) -> None:
         """Initialize the climate entity."""
         super().__init__(coordinator, "climate")
@@ -106,7 +114,6 @@ class ActronClimate(ActronAirNeoEntity, ClimateEntity):
         # takes the device name (has-entity-name rule) instead of duplicating
         # it ("ActronAir Neo ActronAir Neo").
         self._attr_name = None
-        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
         self._attr_min_temp = MIN_TEMP
         self._attr_max_temp = MAX_TEMP
         self._attr_supported_features = (
@@ -195,18 +202,23 @@ class ActronClimate(ActronAirNeoEntity, ClimateEntity):
             return available_modes or [FAN_LOW, FAN_MEDIUM, FAN_HIGH]
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         """Return the current temperature."""
         return self.coordinator.data["main"]["indoor_temp"]
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         """Return the temperature we try to reach."""
         if self.hvac_mode == HVACMode.COOL:
             return self.coordinator.data["main"]["temp_setpoint_cool"]
         if self.hvac_mode == HVACMode.HEAT:
             return self.coordinator.data["main"]["temp_setpoint_heat"]
         return None
+
+    # Runtime descriptor aliases; static checkers use ClimateEntity declarations.
+    if not TYPE_CHECKING and not _HAS_NATIVE_TEMPERATURES:
+        current_temperature = native_current_temperature
+        target_temperature = native_target_temperature
 
     @property
     def hvac_mode(self) -> HVACMode:
@@ -333,6 +345,11 @@ class ActronClimate(ActronAirNeoEntity, ClimateEntity):
 class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
     """Zone climate entity with enhanced control capabilities."""
 
+    if _HAS_NATIVE_TEMPERATURES:
+        _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
+    else:
+        _attr_temperature_unit = UnitOfTemperature.CELSIUS
+
     def __init__(self, coordinator: ActronDataCoordinator, zone_id: str) -> None:
         """Initialize the zone climate entity."""
         zone_name = coordinator.data["zones"][zone_id]["name"]
@@ -354,7 +371,6 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
         )
 
         # Set up basic attributes
-        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
         base_zone_modes: list[HVACMode] = [
             HVACMode.OFF,
             HVACMode.COOL,
@@ -565,12 +581,12 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
         return self._actron_to_ha_hvac_mode(mode)
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         """Return the current temperature."""
         return self.coordinator.data["zones"][self.zone_id]["temp"]
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         """Return the temperature we try to reach."""
         if not self._has_temp_control:
             return None
@@ -616,7 +632,7 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
         return zone_data.get("temp_setpoint_heat")
 
     @property
-    def target_temperature_high(self) -> float | None:
+    def native_target_temperature_high(self) -> float | None:
         """Return the high target temperature."""
         if not (self._has_temp_control and self._has_separate_targets):
             return None
@@ -624,12 +640,19 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
         return self.coordinator.data["zones"][self.zone_id]["temp_setpoint_cool"]
 
     @property
-    def target_temperature_low(self) -> float | None:
+    def native_target_temperature_low(self) -> float | None:
         """Return the low target temperature."""
         if not (self._has_temp_control and self._has_separate_targets):
             return None
 
         return self.coordinator.data["zones"][self.zone_id]["temp_setpoint_heat"]
+
+    # Runtime descriptor aliases; static checkers use ClimateEntity declarations.
+    if not TYPE_CHECKING and not _HAS_NATIVE_TEMPERATURES:
+        current_temperature = native_current_temperature
+        target_temperature = native_target_temperature
+        target_temperature_high = native_target_temperature_high
+        target_temperature_low = native_target_temperature_low
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
