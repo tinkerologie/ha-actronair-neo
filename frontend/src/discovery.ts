@@ -107,6 +107,8 @@ interface Store {
   unsubscribe?: () => void;
   closed: boolean;
   revision: number;
+  retryAttempt: number;
+  retryTimer?: ReturnType<typeof setTimeout>;
   refresh: () => void;
 }
 const stores = new WeakMap<object, Map<string, Store>>();
@@ -123,10 +125,19 @@ export function subscribeDiscovery(
   }
   let store = devices.get(deviceId);
   if (!store) {
-    store = { listeners: new Set(), closed: false, revision: 0, refresh: () => {} };
+    store = {
+      listeners: new Set(),
+      closed: false,
+      revision: 0,
+      retryAttempt: 0,
+      refresh: () => {},
+    };
     devices.set(deviceId, store);
     const current = store;
     const refresh = async () => {
+      if (current.closed) return;
+      if (current.retryTimer) clearTimeout(current.retryTimer);
+      current.retryTimer = undefined;
       const revision = ++current.revision;
       try {
         const data = await hass.callWS<DiscoveryData>({
@@ -154,18 +165,28 @@ export function subscribeDiscovery(
         };
         append(data.system);
         for (const zone of data.zones) append(zone.roles, zone);
+        current.retryAttempt = 0;
         current.registry = registry;
         for (const listener of current.listeners) listener(registry);
       } catch {
-        if (!current.closed && revision === current.revision)
+        if (!current.closed && revision === current.revision) {
+          current.registry = undefined;
           for (const listener of current.listeners)
             listener(
               undefined,
               "This system is not available or not readable by your account. Check the selected device and reconnect.",
             );
+          // A reconnect can precede the integration's loaded state. Share at
+          // most six retries across cards, and cancel them on success/unload.
+          if (current.retryAttempt < 6) {
+            const delay = Math.min(1000 * 2 ** current.retryAttempt++, 30000);
+            current.retryTimer = setTimeout(() => void refresh(), delay);
+          }
+        }
       }
     };
     current.refresh = () => {
+      current.retryAttempt = 0;
       void refresh();
     };
     hass.connection?.addEventListener?.("ready", current.refresh);
@@ -189,6 +210,7 @@ export function subscribeDiscovery(
       current.listeners.delete(callback);
       if (!current.listeners.size) {
         current.closed = true;
+        if (current.retryTimer) clearTimeout(current.retryTimer);
         current.unsubscribe?.();
         hass.connection?.removeEventListener?.("ready", current.refresh);
         devices?.delete(deviceId);

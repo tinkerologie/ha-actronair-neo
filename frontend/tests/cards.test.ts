@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type NeoClimateCard, steppedTarget } from "../src/climate-card";
-import { resolveSystem, zones } from "../src/discovery";
+import { resolveSystem, subscribeDiscovery, zones } from "../src/discovery";
 import { registerCards } from "../src/index";
 import type { EntityState, HomeAssistant, RegistryEntity } from "../src/types";
 
@@ -92,6 +92,38 @@ describe("temperature steps", () => {
   });
 });
 describe("discovery", () => {
+  it("recovers when discovery precedes integration load without registry events", async () => {
+    vi.useFakeTimers();
+    const hass = fixture();
+    vi.mocked(hass.callWS).mockRejectedValueOnce(new Error("not loaded"));
+    const listener = vi.fn();
+    const subscription = subscribeDiscovery(hass, "one", listener);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listener).toHaveBeenLastCalledWith(undefined, expect.any(String));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(hass.callWS).toHaveBeenCalledTimes(2);
+    expect(listener.mock.lastCall?.[0]?.[0]?.entity_id).toBe(climate.entity_id);
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(hass.callWS).toHaveBeenCalledTimes(2);
+    subscription.unsubscribe();
+  });
+  it("bounds failed retries and cancels them after the last subscriber leaves", async () => {
+    vi.useFakeTimers();
+    const hass = fixture();
+    vi.mocked(hass.callWS).mockRejectedValue(new Error("unavailable"));
+    const first = subscribeDiscovery(hass, "one", vi.fn());
+    const second = subscribeDiscovery(hass, "one", vi.fn());
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(hass.callWS).toHaveBeenCalledTimes(7);
+    first.unsubscribe();
+    second.unsubscribe();
+    const next = subscribeDiscovery(hass, "one", vi.fn());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hass.callWS).toHaveBeenCalledTimes(8);
+    next.unsubscribe();
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(hass.callWS).toHaveBeenCalledTimes(8);
+  });
   it("suggests a device from HA display entries without a config entry id", () => {
     const hass = fixture();
     delete hass.entities?.[climate.entity_id]?.config_entry_id;
