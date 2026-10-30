@@ -27,6 +27,7 @@ from .const import (
     ATTR_ZONE_TYPE,
     WATTS_PER_KILOWATT,
 )
+from .dashboard import DashboardRole
 from .entity import ActronAirNeoEntity, ActronZoneEntity
 
 if TYPE_CHECKING:
@@ -115,6 +116,8 @@ async def async_setup_entry(
 class ActronMainSensor(ActronAirNeoEntity, SensorEntity):
     """Main temperature sensor."""
 
+    dashboard_role = DashboardRole.INDOOR_TEMPERATURE
+
     def __init__(self, coordinator: ActronDataCoordinator) -> None:
         """Initialize the main temperature sensor."""
         super().__init__(coordinator, "sensor", "Avg. Inside Temp")
@@ -137,6 +140,8 @@ class ActronMainSensor(ActronAirNeoEntity, SensorEntity):
 
 class ActronZoneSensor(ActronZoneEntity, SensorEntity):
     """Zone temperature sensor."""
+
+    dashboard_role = DashboardRole.ZONE_TEMPERATURE
 
     def __init__(self, coordinator: ActronDataCoordinator, zone_id: str) -> None:
         """Initialize the zone sensor."""
@@ -274,6 +279,8 @@ class ActronZoneSensor(ActronZoneEntity, SensorEntity):
 class ActronZoneDamperPositionSensor(ActronZoneEntity, SensorEntity):
     """Read-only sensor exposing the current zone damper position."""
 
+    dashboard_role = DashboardRole.ZONE_DAMPER_POSITION
+
     _attr_native_unit_of_measurement = UnitOfRatio.PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -323,6 +330,8 @@ class ActronZoneDamperPositionSensor(ActronZoneEntity, SensorEntity):
 class ActronZoneHumiditySensor(ActronZoneEntity, SensorEntity):
     """Zone humidity sensor."""
 
+    dashboard_role = DashboardRole.ZONE_HUMIDITY
+
     _attr_device_class = SensorDeviceClass.HUMIDITY
     _attr_native_unit_of_measurement = UnitOfRatio.PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -360,6 +369,8 @@ class ActronZoneBatterySensor(ActronZoneEntity, SensorEntity):
     Only created for wireless zone sensors that report battery level.
     Wired sensors do not have battery data.
     """
+
+    dashboard_role = DashboardRole.ZONE_BATTERY
 
     _attr_device_class = SensorDeviceClass.BATTERY
     _attr_native_unit_of_measurement = UnitOfRatio.PERCENTAGE
@@ -414,6 +425,8 @@ class ActronZoneBatterySensor(ActronZoneEntity, SensorEntity):
 
 class ActronSystemDiagnosticSensor(ActronAirNeoEntity, SensorEntity):
     """Enhanced system diagnostic sensor with live data and user-friendly formatting."""
+
+    dashboard_role = DashboardRole.SYSTEM_STATE
 
     _attr_translation_key = "system_diagnostics"
     _attr_entity_registry_enabled_default = False
@@ -554,6 +567,8 @@ class ActronSystemDiagnosticSensor(ActronAirNeoEntity, SensorEntity):
 
 class ActronConnectivitySensor(ActronAirNeoEntity, SensorEntity):
     """Enhanced connectivity sensor with signal quality and connection health."""
+
+    dashboard_role = DashboardRole.CONNECTIVITY_STATUS
 
     _attr_translation_key = "connectivity_status"
     _attr_entity_registry_enabled_default = False
@@ -853,6 +868,8 @@ class ActronPerformanceSensor(ActronAirNeoEntity, SensorEntity):
 class ActronCompressorPowerSensor(ActronAirNeoEntity, SensorEntity):
     """Compressor power sensor for energy dashboard compatibility."""
 
+    dashboard_role = DashboardRole.COMPRESSOR_POWER
+
     _attr_translation_key = "compressor_power"
 
     def __init__(self, coordinator: ActronDataCoordinator) -> None:
@@ -915,6 +932,8 @@ class ActronCompressorPowerSensor(ActronAirNeoEntity, SensorEntity):
 
 class ActronCompressorEnergySensor(ActronAirNeoEntity, RestoreSensor):
     """Compressor energy sensor for energy dashboard compatibility."""
+
+    dashboard_role = DashboardRole.COMPRESSOR_ENERGY
 
     _attr_translation_key = "compressor_energy"
 
@@ -1013,6 +1032,8 @@ class ActronCompressorEnergySensor(ActronAirNeoEntity, RestoreSensor):
 class ActronOutdoorTemperatureSensor(ActronAirNeoEntity, SensorEntity):
     """Outdoor temperature sensor."""
 
+    dashboard_role = DashboardRole.OUTDOOR_TEMPERATURE
+
     _attr_translation_key = "outdoor_temperature"
 
     def __init__(self, coordinator: ActronDataCoordinator) -> None:
@@ -1038,6 +1059,8 @@ class ActronOutdoorTemperatureSensor(ActronAirNeoEntity, SensorEntity):
 
 class ActronServiceReminderSensor(ActronAirNeoEntity, SensorEntity):
     """Service reminder sensor."""
+
+    dashboard_role = DashboardRole.SERVICE_REMINDER
 
     _attr_translation_key = "service_reminder"
     _attr_entity_category = EntityCategory.DIAGNOSTIC

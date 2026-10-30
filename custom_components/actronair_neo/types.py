@@ -295,3 +295,22 @@ class ApiResponse(TypedDict, total=False):
 # Fan mode types
 FanModeType = Literal["LOW", "MED", "HIGH", "AUTO"]
 HvacModeType = Literal["COOL", "HEAT", "FAN", "AUTO", "OFF"]
+
+
+class DashboardZoneData(TypedDict):
+    """Permission-filtered dashboard roles for one upstream zone."""
+
+    zone_id: str
+    name: str
+    roles: dict[str, str]
+
+
+class DashboardData(TypedDict):
+    """Read-only entity discovery with no credentials or system serial."""
+
+    entry_id: str
+    device_id: str
+    name: str
+    model: str | None
+    system: dict[str, str]
+    zones: list[DashboardZoneData]

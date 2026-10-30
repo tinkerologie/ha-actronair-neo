@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory
 
+from .dashboard import DashboardRole
 from .entity import ActronAirNeoEntity, ActronZoneEntity
 
 if TYPE_CHECKING:
@@ -57,6 +58,8 @@ async def async_setup_entry(
 class ActronAwayModeSwitch(ActronAirNeoEntity, SwitchEntity):
     """Away mode switch."""
 
+    dashboard_role = DashboardRole.AWAY_MODE
+
     _attr_translation_key = "away_mode"
     _attr_entity_category = EntityCategory.CONFIG
 
@@ -80,6 +83,8 @@ class ActronAwayModeSwitch(ActronAirNeoEntity, SwitchEntity):
 
 class ActronQuietModeSwitch(ActronAirNeoEntity, SwitchEntity):
     """Quiet mode switch."""
+
+    dashboard_role = DashboardRole.QUIET_MODE
 
     _attr_translation_key = "quiet_mode"
     _attr_entity_category = EntityCategory.CONFIG
@@ -105,6 +110,8 @@ class ActronQuietModeSwitch(ActronAirNeoEntity, SwitchEntity):
 class ActronTurboModeSwitch(ActronAirNeoEntity, SwitchEntity):
     """Turbo mode switch (only created when hardware supports it)."""
 
+    dashboard_role = DashboardRole.TURBO_MODE
+
     _attr_translation_key = "turbo_mode"
     _attr_entity_category = EntityCategory.CONFIG
 
@@ -128,6 +135,8 @@ class ActronTurboModeSwitch(ActronAirNeoEntity, SwitchEntity):
 
 class ActronAfterHoursSwitch(ActronAirNeoEntity, SwitchEntity):
     """After hours timer switch."""
+
+    dashboard_role = DashboardRole.AFTER_HOURS
 
     _attr_translation_key = "after_hours"
     _attr_entity_category = EntityCategory.CONFIG
@@ -161,6 +170,8 @@ class ActronAfterHoursSwitch(ActronAirNeoEntity, SwitchEntity):
 
 class ActronContinuousFanSwitch(ActronAirNeoEntity, SwitchEntity):
     """Continuous fan mode switch."""
+
+    dashboard_role = DashboardRole.CONTINUOUS_FAN
 
     _attr_translation_key = "continuous_fan"
     _attr_entity_category = EntityCategory.CONFIG
@@ -239,6 +250,8 @@ class ActronContinuousFanSwitch(ActronAirNeoEntity, SwitchEntity):
 
 class ActronZoneSwitch(ActronZoneEntity, SwitchEntity):
     """Zone switch."""
+
+    dashboard_role = DashboardRole.ZONE_ENABLE
 
     _attr_translation_key = "zone"
 

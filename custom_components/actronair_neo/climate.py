@@ -31,6 +31,7 @@ from .const import (
     MAX_TEMP,
     MIN_TEMP,
 )
+from .dashboard import DashboardRole
 from .entity import ActronAirNeoEntity, ActronZoneEntity
 
 if TYPE_CHECKING:
@@ -101,6 +102,8 @@ async def async_setup_entry(
 
 class ActronClimate(ActronAirNeoEntity, ClimateEntity):
     """Main climate entity with model-aware fan modes."""
+
+    dashboard_role = DashboardRole.SYSTEM_CLIMATE
 
     if _HAS_NATIVE_TEMPERATURES:
         _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
@@ -344,6 +347,8 @@ class ActronClimate(ActronAirNeoEntity, ClimateEntity):
 
 class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
     """Zone climate entity with enhanced control capabilities."""
+
+    dashboard_role = DashboardRole.ZONE_CLIMATE
 
     if _HAS_NATIVE_TEMPERATURES:
         _attr_native_temperature_unit = UnitOfTemperature.CELSIUS

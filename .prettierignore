@@ -1,0 +1,4 @@
+# The frontend source and toolchain use Biome.
+frontend/
+# Generated and verified by script/frontend.
+custom_components/actronair_neo/frontend/

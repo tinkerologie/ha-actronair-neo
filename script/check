@@ -31,4 +31,12 @@ if [ -z "${CI:-}" ] && [ -z "${GITHUB_ACTIONS:-}" ] && [ -d "$SCRIPT_DIR/../.loc
     "$SCRIPT_DIR/hassfest"
 fi
 
+if command -v node >/dev/null 2>&1 && [ -f "$SCRIPT_DIR/../frontend/package.json" ]; then
+    if [ -d "$SCRIPT_DIR/../frontend/node_modules" ]; then
+        "$SCRIPT_DIR/frontend" check
+    else
+        echo "Skipping frontend checks: run script/frontend install first." >&2
+    fi
+fi
+
 log_success "All checks passed"

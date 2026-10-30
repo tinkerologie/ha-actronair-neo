@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from homeassistant.const import EntityCategory
 from homeassistant.helpers.device_registry import (
@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from .const import DEVICE_MANUFACTURER, DOMAIN
+from .dashboard import DashboardRole, register_entity
 
 if TYPE_CHECKING:
     from .coordinator import ActronDataCoordinator
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
 
 class ActronAirNeoEntity(CoordinatorEntity["ActronDataCoordinator"]):
     """Base class for all ActronAir Neo entities."""
+
+    dashboard_role: ClassVar[DashboardRole | None] = None
 
     _attr_has_entity_name = True
     _attr_attribution = "Data provided by ActronAir Neo"
@@ -53,6 +56,11 @@ class ActronAirNeoEntity(CoordinatorEntity["ActronDataCoordinator"]):
         # the name.  HA prefixes the device name (has_entity_name is True).
         if not getattr(self, "_attr_translation_key", None):
             self._attr_name = name_suffix or None
+
+    async def async_added_to_hass(self) -> None:
+        """Register loaded entities for permission-checked dashboard discovery."""
+        await super().async_added_to_hass()
+        register_entity(self)
 
     @property
     def device_info(self) -> DeviceInfo | None:

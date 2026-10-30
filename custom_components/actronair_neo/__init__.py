@@ -46,12 +46,14 @@ from .const import (
     SERVICE_FORCE_UPDATE,
 )
 from .coordinator import ActronDataCoordinator, power_format_storage_key
+from .dashboard import async_register_dashboard
 from .exceptions import (
     ApiError,
     AuthenticationError,
     ConfigurationError,
     ZoneError,
 )
+from .frontend import async_register_frontend
 from .ssl_helper import async_create_clientsession
 
 if TYPE_CHECKING:
@@ -145,6 +147,8 @@ async def async_setup(
 ) -> bool:
     """Set up the ActronAir Neo integration (register services once)."""
     _register_services(hass)
+    async_register_dashboard(hass)
+    await async_register_frontend(hass)
     return True
 
 

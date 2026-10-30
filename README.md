@@ -50,6 +50,41 @@ The release-asset verification command requires GitHub CLI 2.81.0 or later.
 
 In HACS or the Marketplace, selecting an older release without an `actronair_neo.zip` asset can fail to download.
 
+## Dashboard cards
+
+Three cards are bundled with the integration and appear in Home Assistant's card picker:
+
+| Card                      | Controls and readings                                                                                          |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **ActronAir Neo climate** | Neo-style temperature ring, accessible temperature buttons, mode, fan speed, power and supported quick options |
+| **ActronAir Neo zones**   | Zone on/off, temperature and humidity, optional zone setpoints and YourZone airflow controls                   |
+| **ActronAir Neo system**  | Indoor/outdoor readings, compressor power, estimated compressor energy and optional diagnostics                |
+
+Add a card in the dashboard editor and select your **ActronAir Neo device**. Each card discovers only that device's loaded, readable entities. Entity renaming is supported; multiple systems remain separate. Disabled sensors are omitted. Enable optional sensors on the integration's device page to show their readings.
+
+The cards follow the selected Home Assistant theme and work in Sections and masonry views. The ring is a visual indicator; use the temperature buttons or your keyboard to change a setpoint. Unsupported controls are hidden, unavailable controls are disabled, and commands show pending/error feedback. Zone controls do not change the system's HVAC mode. Damper position and the commanded airflow setpoint are shown separately; position-only sensors remain read-only. Compressor energy is an estimate derived from compressor power.
+
+In storage mode, the integration registers one versioned module resource automatically. Reload the browser after an upgrade. YAML dashboards can explicitly register this module resource:
+
+```yaml
+lovelace:
+  resource_mode: yaml
+  resources:
+    - url: /actronair_neo_frontend/actronair-neo-cards.js
+      type: module
+```
+
+For manually managed resources, add or update a `?v=<installed-version>` query after an upgrade to refresh browser caches. Card YAML is also supported:
+
+```yaml
+type: custom:actronair-neo-climate-card
+device_id: your_home_assistant_device_id
+show_options: true
+show_humidity: true
+```
+
+Use `custom:actronair-neo-zones-card` with `show_dampers` and `show_humidity`, or `custom:actronair-neo-status-card` with `show_diagnostics`. Each card accepts an optional `title`.
+
 ## Configuration
 
 1. In Home Assistant, go to **Settings → Devices & Services → Integrations**.

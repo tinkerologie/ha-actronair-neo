@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from homeassistant.components.number import NumberEntity
 from homeassistant.const import EntityCategory, UnitOfTime
 
+from .dashboard import DashboardRole
 from .entity import ActronAirNeoEntity
 
 if TYPE_CHECKING:
@@ -36,6 +37,8 @@ async def async_setup_entry(
 
 class ActronAfterHoursDurationNumber(ActronAirNeoEntity, NumberEntity):
     """Number entity for after hours timer duration."""
+
+    dashboard_role = DashboardRole.AFTER_HOURS_DURATION
 
     _attr_native_min_value = 30
     _attr_native_max_value = 480

@@ -157,6 +157,19 @@ existing sparse checkouts, and refreshes `dev` to the fetched commit each run.
 The blog scanner is read-only; its separate issue-filing command requires an
 explicitly configured `GH_REPO` and an authenticated GitHub CLI.
 
+## Dashboard frontend development
+
+Use the Node version pinned in `frontend/.nvmrc`. Frontend source is TypeScript and Lit; Biome formats and lints it. The committed module and bundled runtime licences are generated into the integration's `frontend/` directory.
+
+```bash
+script/frontend install
+script/frontend check
+script/frontend build
+script/frontend test:browser
+```
+
+Install Chromium for the browser tests with `npm --prefix frontend exec -- playwright install chromium`. CI installs browser OS dependencies too. `script/check` includes the frontend checks when Node is available. Rebuild after frontend changes and commit the generated files; CI verifies that they match the sources. Browser tests use a mocked Home Assistant and make no live HVAC requests.
+
 ## Commit Message Guidelines
 
 We follow Conventional Commits:

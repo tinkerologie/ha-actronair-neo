@@ -1,0 +1,17 @@
+#!/bin/bash
+# Run the pinned dashboard-card toolchain from the repository root.
+set -euo pipefail
+# Playwright forces colour for subprocesses; avoid Node warning about inherited NO_COLOR.
+unset NO_COLOR
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
+case "${1:-check}" in
+    install) npm ci --prefix frontend --ignore-scripts ;;
+    check)
+        for task in lint typecheck test verify-bundle; do
+            npm --prefix frontend run "$task"
+        done
+        ;;
+    build|lint|typecheck|test|test:browser|format|verify-bundle) npm --prefix frontend run "$1" ;;
+    *) echo "Usage: script/frontend [install|check|build|lint|typecheck|test|format|verify-bundle]" >&2; exit 1 ;;
+esac

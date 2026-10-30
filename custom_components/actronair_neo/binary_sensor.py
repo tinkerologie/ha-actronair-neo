@@ -9,6 +9,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 
+from .dashboard import DashboardRole
 from .entity import ActronAirNeoEntity, ActronZoneEntity
 
 if TYPE_CHECKING:
@@ -46,6 +47,8 @@ async def async_setup_entry(
 
 class ActronHealthMonitorSensor(ActronAirNeoEntity, BinarySensorEntity):
     """System health monitor."""
+
+    dashboard_role = DashboardRole.SYSTEM_HEALTH
 
     _attr_translation_key = "system_health"
 
@@ -105,6 +108,8 @@ class ActronHealthMonitorSensor(ActronAirNeoEntity, BinarySensorEntity):
 
 class ActronZoneYourZoneEnabledSensor(ActronZoneEntity, BinarySensorEntity):
     """Binary sensor for YourZone enabled status."""
+
+    dashboard_role = DashboardRole.ZONE_AIRFLOW_CONTROL
 
     _attr_translation_key = "yourzone_enabled"
 
@@ -172,6 +177,8 @@ class ActronFastHeatingSensor(ActronAirNeoEntity, BinarySensorEntity):
 
 class ActronActiveWarningsSensor(ActronAirNeoEntity, BinarySensorEntity):
     """Active warnings binary sensor."""
+
+    dashboard_role = DashboardRole.ACTIVE_WARNINGS
 
     _attr_translation_key = "active_warnings"
 

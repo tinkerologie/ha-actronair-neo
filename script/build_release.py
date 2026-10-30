@@ -25,6 +25,8 @@ REQUIRED = {
     "certs/sectigo_dv_r36.pem",
     "config_flow.py",
     "icons.json",
+    "frontend/actronair-neo-cards.js",
+    "frontend/THIRD_PARTY_LICENSES.txt",
     "manifest.json",
     "services.yaml",
     "strings.json",

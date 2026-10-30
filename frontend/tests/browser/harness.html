@@ -1,0 +1,20 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Neo card validation</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>
+:root { --primary-color:#0277bd;--primary-text-color:#202124;--secondary-text-color:#626870;--card-background-color:#fff;--secondary-background-color:#f1f3f5;--divider-color:#d9dee3;--ha-card-border-radius:20px; }
+body { margin:0; padding:20px; background:#eceff3; font-family:Arial,sans-serif; color:var(--primary-text-color); }
+body.dark { --primary-text-color:#e7eaee;--secondary-text-color:#a7b0bc;--card-background-color:#20242a;--secondary-background-color:#2c323a;--divider-color:#3b424d;background:#101318; }
+h1 { font-size:20px; }main { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));gap:20px;align-items:start; }ha-card {display:block;} </style></head><body><header><h1>Neo dashboard</h1></header><main id="cards"></main>
+<script type="module">
+import "/actronair-neo-cards.js";
+
+const states = {};
+const put=(id,state,attributes)=>states[id]={entity_id:id,state,attributes};
+put("climate.system","cool",{friendly_name:"Home climate",current_temperature:25,temperature:24,current_humidity:51,temperature_unit:"°C",min_temp:16,max_temp:30,target_temp_step:0.5,hvac_modes:["off","cool","heat","auto","fan_only"],fan_modes:["auto","low","medium","high"],fan_mode:"high",supported_features:393});
+const system={system_climate:"climate.system",quiet_mode:"switch.quiet",away_mode:"switch.away",continuous_fan:"switch.continuous",compressor_power:"sensor.power",compressor_energy:"sensor.energy",outdoor_temperature:"sensor.outside",indoor_temperature:"sensor.inside"};
+put("switch.quiet","on",{});put("switch.away","off",{});put("switch.continuous","off",{});
+put("sensor.power","2450",{unit_of_measurement:"W"});put("sensor.energy","12.7",{unit_of_measurement:"kWh"});put("sensor.outside","29",{unit_of_measurement:"°C"});put("sensor.inside","25",{unit_of_measurement:"°C"});
+const zones=["Bedroom","Office","Living room","Guest room"].map((name,index)=>{const zone_id=`zone_${index+1}`,switchId=`switch.z${index}`,sensorId=`sensor.z${index}`,coverId=`cover.z${index}`;put(switchId,index<2?"on":"off",{});put(sensorId,String(23+index*.5),{unit_of_measurement:"°C",device_class:"temperature"});put(coverId,"open",{current_position:65,airflow_setpoint:50,supported_features:4});return{zone_id,name,roles:{zone_enable:switchId,zone_temperature:sensorId,zone_damper:coverId}};});
+const hass={states,entities:{"climate.system":{entity_id:"climate.system",platform:"actronair_neo",device_id:"device",config_entry_id:"entry"}},language:"en",config:{unit_system:{temperature:"°C"}},callWS:async()=>({device_id:"device",entry_id:"entry",system,zones}),callService:async(domain,service,data)=>{window.calls.push({domain,service,data});if(window.failNext){window.failNext=false;throw new Error("Rejected");}if(window.hold)return;await new Promise(resolve=>setTimeout(resolve,30));const old=states[data.entity_id];if(service==="set_temperature")put(data.entity_id,old.state,{...old.attributes,temperature:data.temperature});else if(service==="turn_off"||service==="turn_on")put(data.entity_id,service==="turn_on"?"on":"off",old.attributes);window.refresh();}};
+window.calls=[];window.failNext=false;window.hold=false;window.hass=hass;
+window.refresh=()=>{for(const card of document.querySelectorAll("main > *"))card.hass={...hass};};
+for(const type of ["climate","zones","status"]){const card=document.createElement(`actronair-neo-${type}-card`);card.setConfig({type:`custom:actronair-neo-${type}-card`,device_id:"device",show_options:true});card.hass=hass;document.querySelector("main").append(card);}
+</script></body></html>
