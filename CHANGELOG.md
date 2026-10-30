@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Three bundled, Neo-inspired dashboard cards for system climate controls, zones and system insights. The cards use theme-aware layouts, visual configuration, keyboard-accessible controls and capability-based discovery through a read-only, permission-checked websocket command. Entity IDs, unique IDs and state attributes stay unchanged. Zone airflow setpoints and reported damper position are distinguished; compressor energy is labelled as estimated (#211).
+
 - Deprecation checks fail CI for Python warnings and Home Assistant deprecation logs attributed to this integration. Weekly HA Next checks the newest PyPI release (including betas) and Core `dev`, with one tracked issue per failing channel. A weekly developer-blog watcher files deduplicated enhancement issues when change announcements name identifiers used by the integration (#210).
 
 ### Changed

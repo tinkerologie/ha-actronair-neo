@@ -11,6 +11,7 @@ from homeassistant.components.cover import (  # type: ignore[import-untyped]
     CoverEntityFeature,
 )
 
+from .dashboard import DashboardRole
 from .entity import ActronZoneEntity
 
 if TYPE_CHECKING:
@@ -48,6 +49,8 @@ class ActronZoneDamperCover(ActronZoneEntity, CoverEntity):
     current_cover_position reflects the actual damper position (read-only),
     while set_cover_position sets the target airflow setpoint.
     """
+
+    dashboard_role = DashboardRole.ZONE_DAMPER
 
     _attr_device_class = CoverDeviceClass.DAMPER
     _attr_supported_features = (

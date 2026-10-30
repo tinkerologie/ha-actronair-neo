@@ -1,9 +1,10 @@
 {
   "domain": "actronair_neo",
   "name": "ActronAir Neo",
+  "after_dependencies": ["frontend", "http", "lovelace"],
   "codeowners": ["@ruaan-deysel"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["websocket_api"],
   "documentation": "https://github.com/tinkerologie/ha-actronair-neo",
   "integration_type": "device",
   "iot_class": "cloud_push",

@@ -75,3 +75,24 @@ jobs:
           uv run --no-project script/build_release.py --output-dir dist/second
           cmp dist/first/actronair_neo.zip dist/second/actronair_neo.zip
           cmp dist/first/SHA256SUMS dist/second/SHA256SUMS
+
+  frontend:
+    name: Dashboard cards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.nvmrc
+      - name: Install frontend dependencies
+        run: script/frontend install
+      - name: Validate cards and committed bundle
+        run: script/frontend check
+      - name: Install browser test engine
+        run: npm --prefix frontend exec -- playwright install --with-deps chromium
+      - name: Browser and accessibility checks
+        run: script/frontend test:browser

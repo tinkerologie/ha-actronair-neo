@@ -117,3 +117,9 @@ superpowers/
 docs/superpowers/
 
 .env
+
+# Frontend build tooling
+frontend/node_modules/
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
