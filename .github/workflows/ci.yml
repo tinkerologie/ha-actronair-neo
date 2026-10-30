@@ -56,3 +56,22 @@ jobs:
         run: uv sync --locked --all-extras --no-editable
       - name: Run tests
         run: uv run --frozen --no-sync pytest --cov=custom_components/actronair_neo --cov-report=term-missing
+
+  package:
+    name: Reproducible release ZIP
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - name: Build twice and compare
+        run: |
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          uv run --no-project script/build_release.py --output-dir dist/first
+          uv run --no-project script/build_release.py --output-dir dist/second
+          cmp dist/first/actronair_neo.zip dist/second/actronair_neo.zip
+          cmp dist/first/SHA256SUMS dist/second/SHA256SUMS

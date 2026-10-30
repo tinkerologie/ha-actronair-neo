@@ -3,327 +3,237 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - custom_components/actronair_neo/manifest.json
-    tags:
-      - '[0-9]*'
+    branches: [main]
+    paths: [custom_components/actronair_neo/manifest.json]
+    tags: ["[0-9]*"]
   workflow_dispatch:
 
 permissions:
-  contents: read # jobs request only what they need
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  auto_tag:
-    name: Tag Release
-    if: startsWith(github.ref, 'refs/heads/')
+  build:
+    name: Build and attest
     runs-on: ubuntu-latest
     permissions:
-      contents: write # create the GitHub release and tag
+      contents: read
+      id-token: write
+      attestations: write
     outputs:
-      tag_created: ${{ steps.create_tag.outputs.created || 'false' }}
-      version: ${{ steps.manifest.outputs.version }}
-
+      version: ${{ steps.resolve.outputs.version }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      create_tag: ${{ steps.resolve.outputs.create_tag }}
+      should_release: ${{ steps.resolve.outputs.should_release }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
-
-      - name: Read version from manifest
-        id: manifest
-        run: |
-          VERSION=$(python3 -c "import json; print(json.load(open('custom_components/actronair_neo/manifest.json'))['version'])")
-
-          if [ -z "$VERSION" ]; then
-            echo "Version not found in manifest.json"
-            exit 1
-          fi
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Manifest version: $VERSION"
-
-      - name: Check if tag already exists
-        id: check_tag
-        env:
-          MANIFEST_VERSION: ${{ steps.manifest.outputs.version }}
-        run: |
-          TAG="${MANIFEST_VERSION}"
-
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag $TAG already exists (local)"
-            exit 0
-          fi
-
-          if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag $TAG already exists (remote)"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Tag $TAG does not exist"
-          fi
-
-      - name: Create and push tag
-        id: create_tag
-        if: steps.check_tag.outputs.exists == 'false'
-        env:
-          MANIFEST_VERSION: ${{ steps.manifest.outputs.version }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${MANIFEST_VERSION}"
-          echo "Creating tag $TAG"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git tag -a "$TAG" -m "Release $TAG"
-          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TAG"
-          echo "created=true" >> "$GITHUB_OUTPUT"
-
-      - name: Summary
-        env:
-          MANIFEST_VERSION: ${{ steps.manifest.outputs.version }}
-          CHECK_TAG_EXISTS: ${{ steps.check_tag.outputs.exists }}
-        run: |
-          TAG="${MANIFEST_VERSION}"
-          if [ "${CHECK_TAG_EXISTS}" = "true" ]; then
-            echo "Tag $TAG already existed. No new tag created." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Created and pushed tag $TAG from manifest.json version." >> "$GITHUB_STEP_SUMMARY"
-            echo "Release job will run next in this workflow." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-  release:
-    name: Release
-    needs: auto_tag
-    if: >-
-      always() && !cancelled() &&
-      (startsWith(github.ref, 'refs/tags/') ||
-       needs.auto_tag.outputs.tag_created == 'true' ||
-       github.event_name == 'workflow_dispatch')
-
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # create the GitHub release and tag
-      id-token: write # trusted publishing (OIDC) to the package registry
-      attestations: write
-    # Run when: (1) triggered directly by a tag push, OR
-    # (2) auto_tag just created a new tag in this workflow run, OR
-    # (3) manually triggered via workflow_dispatch.
-    # always() is needed so the job evaluates even when auto_tag is skipped.
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
           fetch-depth: 0
-          persist-credentials: false
-
-      - name: Extract version
-        id: version
-        env:
-          AUTO_TAG_VERSION: ${{ needs.auto_tag.outputs.version }}
+      - name: Resolve source and version
+        id: resolve
         run: |
-          # Determine version from tag ref (direct tag push) or auto_tag output
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          CREATE_TAG=false
+          SHOULD_RELEASE=true
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/}
           else
-            VERSION="${AUTO_TAG_VERSION}"
+            VERSION=$(python3 -c 'import json; print(json.load(open("custom_components/actronair_neo/manifest.json"))["version"])')
           fi
-
-          if [ -z "$VERSION" ]; then
-            echo "ERROR: Could not determine version"
+          git check-ref-format "refs/tags/$VERSION"
+          REMOTE=$(git ls-remote --tags origin "refs/tags/$VERSION" "refs/tags/$VERSION^{}")
+          TAG_SHA=$(awk '$2 !~ /\^\{\}$/ {print $1}' <<< "$REMOTE")
+          PEELED=$(awk '$2 ~ /\^\{\}$/ {print $1}' <<< "$REMOTE")
+          TAG_SHA=${PEELED:-$TAG_SHA}
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+            if [[ -z "$TAG_SHA" ]]; then
+              CREATE_TAG=true
+            elif [[ "$GITHUB_EVENT_NAME" == push ]]; then
+              SHOULD_RELEASE=false
+              echo "Tag $VERSION already exists; skipping manifest push." >> "$GITHUB_STEP_SUMMARY"
+            elif [[ "$TAG_SHA" != "$SHA" ]]; then
+              echo "Tag $VERSION points to a different commit; refusing to release."
+              exit 1
+            fi
+          elif [[ "$TAG_SHA" != "$SHA" ]]; then
+            echo "Tag no longer matches the checked-out commit."
             exit 1
           fi
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version: $VERSION"
-
-          # Check if this is a pre-release
-          if [[ "$VERSION" =~ (alpha|beta|rc) ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "This is a pre-release"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "This is a stable release"
-          fi
-
-      - name: Verify manifest.json version matches
+          PRERELEASE=false
+          if [[ "$VERSION" =~ (alpha|beta|rc) ]]; then PRERELEASE=true; fi
+          {
+            echo "version=$VERSION"
+            echo "sha=$SHA"
+            echo "prerelease=$PRERELEASE"
+            echo "create_tag=$CREATE_TAG"
+            echo "should_release=$SHOULD_RELEASE"
+          } >> "$GITHUB_OUTPUT"
+      - name: Set up uv
+        if: steps.resolve.outputs.should_release == 'true'
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - name: Build release
+        if: steps.resolve.outputs.should_release == 'true'
         env:
-          VERSION_VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+          SOURCE_SHA: ${{ steps.resolve.outputs.sha }}
         run: |
-          MANIFEST_VERSION=$(python3 -c "import json; print(json.load(open('custom_components/actronair_neo/manifest.json'))['version'])")
-          TAG_VERSION="${VERSION_VERSION}"
-
-          if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
-            echo "ERROR: manifest.json version ($MANIFEST_VERSION) does not match tag ($TAG_VERSION)"
-            exit 1
-          fi
-
-          echo "✅ manifest.json version matches tag: $TAG_VERSION"
-
-      - name: Build release package
-        id: build
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct "$SOURCE_SHA")
+          export SOURCE_DATE_EPOCH
+          uv run --no-project script/build_release.py --tag "$VERSION"
+      - name: Prepare release notes
+        if: steps.resolve.outputs.should_release == 'true'
         env:
-          VERSION_VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.resolve.outputs.version }}
         run: |
-          VERSION="${VERSION_VERSION}"
-          PACKAGE_FILE="actronair_neo-${VERSION}.zip"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          version = os.environ['VERSION']
+          changelog = Path('CHANGELOG.md').read_text()
+          heading = f'## [{version}]'
+          notes = ''
+          for section in changelog.split('\n## '):
+              if ('## ' + section).startswith(heading):
+                  notes = section.split('\n', 1)[1].strip()
+                  break
+          notes = notes or f'Release {version} of the ActronAir Neo integration.'
+          checksum = Path('dist/SHA256SUMS').read_text().strip()
+          repository = os.environ['GITHUB_REPOSITORY']
+          notes += f'''
 
-          cd custom_components
-          zip -r "../${PACKAGE_FILE}" actronair_neo/ \
-            -x "*.pyc" \
-            -x "*__pycache__*" \
-            -x "*.git*" \
-            -x "*.DS_Store"
-          cd ..
+          ## Installation
 
-          if [ ! -f "$PACKAGE_FILE" ]; then
-            echo "ERROR: Package file not found: $PACKAGE_FILE"
-            exit 1
-          fi
+          In HACS or the Marketplace, download ActronAir Neo and restart Home Assistant.
+          For manual installation, extract `actronair_neo.zip` into
+          `config/custom_components/actronair_neo/` and restart Home Assistant.
+          The ZIP contains files at its root. Older releases without this fixed-name
+          asset may fail to download when selected in HACS or the Marketplace.
 
-          SHA256=$(sha256sum "$PACKAGE_FILE" | awk '{print $1}')
-          echo "${SHA256}  ${PACKAGE_FILE}" > SHA256SUM
+          ## Verify the download
 
-          echo "package=$PACKAGE_FILE" >> "$GITHUB_OUTPUT"
-          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          Download `SHA256SUMS` alongside the ZIP, then run:
 
-          echo "✅ Package: $PACKAGE_FILE ($(du -h "$PACKAGE_FILE" | cut -f1))"
-          echo "✅ SHA256: $SHA256"
+          ```sh
+          sha256sum -c SHA256SUMS
+          gh attestation verify actronair_neo.zip --repo {repository}
+          gh release verify-asset {version} actronair_neo.zip --repo {repository}
+          ```
 
+          Release verification requires GitHub CLI 2.81.0 or later.
+
+          ```text
+          {checksum}
+          ```
+          '''
+          Path('dist/RELEASE_NOTES.md').write_text(notes + '\n')
+          Path('dist/CHANGELOG.md').write_text(changelog)
+          PY
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        if: steps.resolve.outputs.should_release == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
-          subject-path: ${{ steps.build.outputs.package }}
+          subject-path: dist/actronair_neo.zip
+      - name: Upload release files
+        if: steps.resolve.outputs.should_release == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Build release notes
-        env:
-          VERSION_VERSION: ${{ steps.version.outputs.version }}
-          BUILD_SHA256: ${{ steps.build.outputs.sha256 }}
-          BUILD_PACKAGE: ${{ steps.build.outputs.package }}
+  publish:
+    name: Verify and publish
+    needs: build
+    if: needs.build.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.build.outputs.version }}
+      SOURCE_SHA: ${{ needs.build.outputs.sha }}
+      CREATE_TAG: ${{ needs.build.outputs.create_tag }}
+      PRERELEASE: ${{ needs.build.outputs.prerelease }}
+    steps:
+      - name: Download release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      - name: Require a recent GitHub CLI
         run: |
-          VERSION="${VERSION_VERSION}"
-          SHA256="${BUILD_SHA256}"
-          PACKAGE="${BUILD_PACKAGE}"
-          REPO="${GITHUB_REPOSITORY}"
-
-          # Extract version-specific notes from CHANGELOG.md
-          NOTES=""
-          if [ -f "CHANGELOG.md" ] && grep -q "\[$VERSION\]" CHANGELOG.md; then
-            NOTES=$(awk "/^## \[$VERSION\]/{found=1; next} found && /^## \[/{exit} found" CHANGELOG.md | sed '/^$/N;/^\n$/d')
-          fi
-
-          if [ -z "$NOTES" ]; then
-            NOTES="Release ${VERSION} of the ActronAir Neo Home Assistant integration."
-          fi
-
-          # Assemble RELEASE_NOTES.md using a heredoc
-          cat > RELEASE_NOTES.md << EOF
-          ${NOTES}
-
-          See [CHANGELOG.md](https://github.com/${REPO}/blob/main/CHANGELOG.md) for full changelog.
-
-          ---
-
-          ## 📦 Installation
-
-          ### Via HACS (Recommended)
-
-          1. Open HACS in Home Assistant
-          2. Go to **Integrations**
-          3. Click the **⋮** menu → **Custom repositories**
-          4. Add this repository: \`https://github.com/${REPO}\`
-          5. Category: **Integration**
-          6. Click **Add**
-          7. Search for **ActronAir Neo**
-          8. Click **Download**
-          9. Restart Home Assistant
-
-          ### Manual Installation
-
-          1. Download \`${PACKAGE}\`
-          2. Extract to \`config/custom_components/\`
-          3. Restart Home Assistant
-          4. Add the integration via **Settings** → **Devices & Services** → **Add Integration**
-
-          ---
-
-          **SHA256 Checksum:**
-          \`\`\`
-          ${SHA256}  ${PACKAGE}
-          \`\`\`
-          EOF
-
-          cat RELEASE_NOTES.md
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION_VERSION: ${{ steps.version.outputs.version }}
-          VERSION_PRERELEASE: ${{ steps.version.outputs.prerelease }}
-          BUILD_PACKAGE: ${{ steps.build.outputs.package }}
+          VERSION_INSTALLED=$(gh --version | head -1 | awk '{print $3}')
+          dpkg --compare-versions "$VERSION_INSTALLED" ge 2.81.0 || {
+            echo 'GitHub CLI 2.81.0 or later is required.'
+            exit 1
+          }
+      - name: Verify checksum and provenance
         run: |
-          VERSION="${VERSION_VERSION}"
-
-          PRERELEASE_FLAG=""
-          if [ "${VERSION_PRERELEASE}" = "true" ]; then
-            PRERELEASE_FLAG="--prerelease"
-          fi
-
-          # shellcheck disable=SC2086
-          gh release create "${VERSION}" \
-            "${BUILD_PACKAGE}" \
-            SHA256SUM \
-            CHANGELOG.md \
-            --title "${VERSION}" \
-            --notes-file RELEASE_NOTES.md \
-            --verify-tag \
-            $PRERELEASE_FLAG
-
-      - name: Release Summary
-        if: always()
-        env:
-          VERSION_VERSION: ${{ steps.version.outputs.version }}
-          JOB_STATUS: ${{ job.status }}
-          BUILD_PACKAGE: ${{ steps.build.outputs.package }}
-          BUILD_SHA256: ${{ steps.build.outputs.sha256 }}
-          RELEASE_TYPE: ${{ steps.version.outputs.prerelease == 'true' && 'Pre-release' || 'Stable release' }}
+          sha256sum -c SHA256SUMS
+          gh attestation verify actronair_neo.zip --repo "$GH_REPO" \
+            --signer-workflow "$GH_REPO/.github/workflows/release.yml" \
+            --source-digest "$SOURCE_SHA"
+      - name: Create and verify annotated tag
         run: |
-          VERSION="${VERSION_VERSION}"
-
-          if [ "${JOB_STATUS}" = "success" ]; then
-            cat >> "$GITHUB_STEP_SUMMARY" << EOF
-          ## 🎉 ${VERSION} Released Successfully!
-
-          **Package:** \`${BUILD_PACKAGE}\`
-
-          **SHA256:** \`${BUILD_SHA256}\`
-
-          **Release:** https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}
-
-          **Type:** ${RELEASE_TYPE}
-
-          ### 📋 Next Steps
-
-          - ✅ Release created and package uploaded
-          - ✅ Build provenance attestation recorded
-          - ✅ HACS users can now update to ${VERSION}
-          - ✅ Manual installation package available for download
-          EOF
-          else
-            cat >> "$GITHUB_STEP_SUMMARY" << EOF
-          ## ❌ ${VERSION} Release Failed
-
-          The release workflow did not complete successfully.
-          Check the job logs above for details.
-
-          **Status:** ${JOB_STATUS}
-          EOF
+          set -euo pipefail
+          TAG_PATH=$(jq -rn --arg tag "$VERSION" '$tag | @uri')
+          REF="repos/$GH_REPO/git/ref/tags/$TAG_PATH"
+          if [[ "$CREATE_TAG" == true ]] && ! gh api "$REF" >/dev/null 2>&1; then
+            TAG_OBJECT=$(gh api --method POST "repos/$GH_REPO/git/tags" \
+              -f tag="$VERSION" -f message="Release $VERSION" \
+              -f object="$SOURCE_SHA" -f type=commit --jq .sha)
+            # A racing run may have created the ref; its target is checked below.
+            if ! gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref="refs/tags/$VERSION" -f sha="$TAG_OBJECT"; then
+              gh api "$REF" >/dev/null
+            fi
           fi
+          OBJECT=$(gh api "$REF" --jq .object)
+          for _ in {1..10}; do
+            TYPE=$(jq -r .type <<< "$OBJECT")
+            TAG_SHA=$(jq -r .sha <<< "$OBJECT")
+            if [[ "$TYPE" == commit ]]; then break; fi
+            [[ "$TYPE" == tag ]] || exit 1
+            OBJECT=$(gh api "repos/$GH_REPO/git/tags/$TAG_SHA" --jq .object)
+          done
+          [[ "$TYPE" == commit && "$TAG_SHA" == "$SOURCE_SHA" ]] || {
+            echo 'Tag does not resolve to the attested source commit.'
+            exit 1
+          }
+      - name: Replace stale draft and publish
+        run: |
+          set -euo pipefail
+          RELEASES=$(gh release list --limit 1000 --json tagName,isDraft)
+          STATE=$(jq -r --arg tag "$VERSION" '.[] | select(.tagName == $tag) | .isDraft' <<< "$RELEASES")
+          if [[ "$STATE" == false ]]; then
+            echo "Release $VERSION is already published and cannot be replaced."
+            exit 1
+          elif [[ "$STATE" == true ]]; then
+            gh release delete "$VERSION" --yes
+          fi
+          FLAGS=()
+          if [[ "$PRERELEASE" == true ]]; then FLAGS+=(--prerelease); fi
+          gh release create "$VERSION" --draft --verify-tag --title "$VERSION" \
+            --notes-file RELEASE_NOTES.md "${FLAGS[@]}" \
+            actronair_neo.zip SHA256SUMS CHANGELOG.md
+          gh release edit "$VERSION" --draft=false
+      - name: Verify immutable release and asset
+        run: |
+          for attempt in {1..5}; do
+            if gh release verify "$VERSION" && \
+               gh release verify-asset "$VERSION" actronair_neo.zip; then
+              echo "Verified release $VERSION and its ZIP." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [[ "$attempt" -lt 5 ]]; then sleep 10; fi
+          done
+          echo 'Release verification failed. Enable release immutability before releasing.'
+          exit 1

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- HACS and the Marketplace install the fixed-name `actronair_neo.zip` release asset, enabling asset download counts. Integration files are at the ZIP root; `SHA256SUMS` accompanies the reproducible archive. Releases separate attested builds from verified publication, publish through a draft, and verify release immutability. Selecting older releases without this asset can fail to download (#209).
+
 ## [2026.10.4] - 2026-10-27
 
 ### Fixed
