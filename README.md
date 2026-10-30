@@ -30,8 +30,25 @@ The ActronAir Neo Integration enables seamless control and monitoring of your Ac
 
 ### Manual
 
-1. Copy the `actronair_neo` folder into your `custom_components` directory.
-2. Restart Home Assistant.
+1. Download `actronair_neo.zip` and `SHA256SUMS` from the [latest release](https://github.com/tinkerologie/ha-actronair-neo/releases/latest).
+2. Create `config/custom_components/actronair_neo/` and extract the ZIP into that directory. Its files, including `manifest.json`, belong directly there.
+3. Restart Home Assistant.
+
+For a source checkout, copy `custom_components/actronair_neo/` into your Home Assistant `config/custom_components/` directory instead, then restart.
+
+#### Verify the download
+
+Run these commands in the directory containing the downloaded ZIP and checksum file. Replace `<tag>` with the release version:
+
+```sh
+sha256sum -c SHA256SUMS
+gh attestation verify actronair_neo.zip --repo tinkerologie/ha-actronair-neo
+gh release verify-asset <tag> actronair_neo.zip --repo tinkerologie/ha-actronair-neo
+```
+
+The release-asset verification command requires GitHub CLI 2.81.0 or later.
+
+In HACS or the Marketplace, selecting an older release without an `actronair_neo.zip` asset can fail to download.
 
 ## Configuration
 
