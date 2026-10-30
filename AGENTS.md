@@ -376,6 +376,23 @@ script/check     # Type-check + lint-check + spell-check (comprehensive)
 **Generate code that passes these checks on first run.** Type hints, async patterns,
 and naming conventions should be correct before handing back to the developer.
 
+### Home Assistant compatibility checks
+
+Python deprecations attributed to `custom_components.actronair_neo` are errors in
+pytest; third-party warnings use the default policy. The autouse fixture in
+`tests/conftest.py` also fails for HA logs naming this integration in the
+"Detected that custom integration", "The deprecated … was used from", and
+"module::Class provides the deprecated" formats. Import-time reports are checked
+by `script/ha-next/import_check.py` before integration imports begin.
+
+For compatibility work, use the local commands in CONTRIBUTING.md under
+"Home Assistant compatibility monitoring". HA Next checks the newest PyPI release
+(including betas) and Core `dev` weekly, with one `ha-next` + `bug` issue per
+failing channel. The developer-blog watch accepts a `days` window and opens one
+`ha-dev-blog` + `enhancement` issue per matching post, deduplicated across open
+and closed issues. These workflows set type labels explicitly because issues
+created with `GITHUB_TOKEN` do not trigger the issue-labeler.
+
 ### Error Recovery Strategy
 
 **When validation fails:**

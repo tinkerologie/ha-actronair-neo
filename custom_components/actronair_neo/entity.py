@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from homeassistant.const import EntityCategory
 from homeassistant.helpers.device_registry import (
     DeviceInfo,  # type: ignore[import-untyped]
 )
-from homeassistant.helpers.entity import EntityCategory  # type: ignore[import-untyped]
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,  # type: ignore[import-untyped]
 )

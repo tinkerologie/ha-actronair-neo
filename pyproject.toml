@@ -69,7 +69,8 @@ norecursedirs = [".git", "custom_components"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
-    "ignore::DeprecationWarning",
+    'error::DeprecationWarning:custom_components\.actronair_neo(\.|$)',
+    'error::PendingDeprecationWarning:custom_components\.actronair_neo(\.|$)',
 ]
 addopts = [
     "--strict-markers",

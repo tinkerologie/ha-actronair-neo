@@ -13,12 +13,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    EntityCategory,
     UnitOfEnergy,
     UnitOfPower,
     UnitOfRatio,
     UnitOfTemperature,
 )
-from homeassistant.helpers.entity import EntityCategory  # type: ignore[import-untyped]
 
 from .const import (
     ATTR_BATTERY_LEVEL,

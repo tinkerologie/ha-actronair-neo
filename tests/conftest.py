@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -21,6 +23,33 @@ from custom_components.actronair_neo.const import (
 # ── Constants ────────────────────────────────────────────────────
 
 MOCK_SERIAL = "ABC123"
+
+# The HA harness has no switch for failing on these deprecation log formats.
+HA_DEPRECATION_PATTERNS = (
+    re.compile(r"Detected that custom integration 'actronair_neo'"),
+    re.compile(r"The deprecated .* was used from actronair_neo\b"),
+    re.compile(
+        r"custom_components\.actronair_neo\.[\w.]+::\w+ provides the deprecated "
+    ),
+)
+
+
+@pytest.fixture(autouse=True)
+def fail_on_ha_deprecations(caplog):
+    """Fail for HA deprecation reports naming this integration."""
+    caplog.set_level(logging.WARNING)
+    yield
+    # Import-time class migrations precede fixtures; HA Next's import check covers them.
+    messages = {
+        record.getMessage()
+        for phase in ("setup", "call", "teardown")
+        for record in caplog.get_records(phase)
+        if any(
+            pattern.search(record.getMessage()) for pattern in HA_DEPRECATION_PATTERNS
+        )
+    }
+    if messages:
+        pytest.fail("Home Assistant deprecations:\n" + "\n".join(sorted(messages)))
 
 
 # ── Helpers ──────────────────────────────────────────────────────
