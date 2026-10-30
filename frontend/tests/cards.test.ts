@@ -107,6 +107,24 @@ describe("discovery", () => {
     expect(hass.callWS).toHaveBeenCalledTimes(2);
     subscription.unsubscribe();
   });
+  it("cancels a shared pending retry only after the final subscriber leaves", async () => {
+    vi.useFakeTimers();
+    const hass = fixture();
+    vi.mocked(hass.callWS).mockRejectedValue(new Error("unavailable"));
+    const first = subscribeDiscovery(hass, "one", vi.fn());
+    const second = subscribeDiscovery(hass, "one", vi.fn());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hass.callWS).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1);
+    first.unsubscribe();
+    expect(vi.getTimerCount()).toBe(1);
+    second.unsubscribe();
+    expect(vi.getTimerCount()).toBe(0);
+    first.refresh();
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(hass.callWS).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it("bounds failed retries and cancels them after the last subscriber leaves", async () => {
     vi.useFakeTimers();
     const hass = fixture();
