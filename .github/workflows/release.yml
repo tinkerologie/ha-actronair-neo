@@ -221,10 +221,30 @@ jobs:
           fi
           FLAGS=()
           if [[ "$PRERELEASE" == true ]]; then FLAGS+=(--prerelease); fi
+          verify_tag() {
+            local TAG_PATH OBJECT TYPE TAG_SHA
+            TAG_PATH=$(jq -rn --arg tag "$VERSION" '$tag | @uri')
+            OBJECT=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG_PATH" --jq .object)
+            for _ in {1..10}; do
+              TYPE=$(jq -r .type <<< "$OBJECT")
+              TAG_SHA=$(jq -r .sha <<< "$OBJECT")
+              if [[ "$TYPE" == commit ]]; then break; fi
+              [[ "$TYPE" == tag ]] || return 1
+              OBJECT=$(gh api "repos/$GH_REPO/git/tags/$TAG_SHA" --jq .object)
+            done
+            [[ "$TYPE" == commit && "$TAG_SHA" == "$SOURCE_SHA" ]] || {
+              echo 'Release tag does not resolve to the attested source commit.'
+              return 1
+            }
+          }
           gh release create "$VERSION" --draft --verify-tag --title "$VERSION" \
             --notes-file RELEASE_NOTES.md "${FLAGS[@]}" \
             actronair_neo.zip SHA256SUMS CHANGELOG.md
+          # Repository tag rules prevent moves while a release is a draft.
+          # Recheck immediately before publication and diagnose afterward.
+          verify_tag
           gh release edit "$VERSION" --draft=false
+          verify_tag
       - name: Verify immutable release and asset
         run: |
           for attempt in {1..5}; do
