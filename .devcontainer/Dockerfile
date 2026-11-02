@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/python:3.14
+FROM mcr.microsoft.com/devcontainers/python:3.15
 
 # Remove Yarn repository to fix GPG key verification issue
 # The Yarn repo in the base image has an expired/missing GPG key
