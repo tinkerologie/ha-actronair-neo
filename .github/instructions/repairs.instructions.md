@@ -22,19 +22,39 @@ settings, missing configuration, etc.).
 
 ## Creating Issues
 
+Issues that concern one config entry belong to it: make the issue ID unique
+per entry and pass `config_entry_id`. Home Assistant deletes entry-owned issues
+when the entry is removed and hides them while it is disabled.
+
 ```python
 from homeassistant.helpers import issue_registry as ir
 
 ir.async_create_issue(
     hass,
     DOMAIN,
-    "issue_id",
+    f"device_offline_{entry.entry_id}",  # unique within the domain
+    config_entry_id=entry.entry_id,
     is_fixable=True,  # Shows "Fix" button
     severity=ir.IssueSeverity.WARNING,
-    translation_key="issue_id",
+    translation_key="device_offline",  # bare key; shared translations
     translation_placeholders={"key": "value"},
 )
 ```
+
+**Maintaining issues:** wrap the checks in an entry-scoped refresh and only
+create issues whose condition holds. When the block exits, the entry's issues
+that were not created (or kept) are deleted. Recreating an existing issue keeps
+the user's "ignore". Wrap only the checks, never `async_forward_entry_setups`.
+
+```python
+with ir.async_refresh_issues(hass, DOMAIN, config_entry_id=entry.entry_id):
+    if not coordinator.last_update_success:
+        ir.async_create_issue(...)  # as above
+```
+
+Use `ir.async_keep_issue()` for an issue whose state cannot be determined
+during the refresh. `async_create_fix_flow` receives the qualified ID, so
+dispatch by key prefix.
 
 **When to create issues:**
 
@@ -96,4 +116,8 @@ class MyRepairFlow(RepairsFlow):
 
 - Put repair flows in `config_flow.py` (separate system)
 - Leave issues after repair completes (always delete)
+- Delete entry-owned issues in `async_unload_entry` (reloads unload too) or
+  `async_remove_entry` (Home Assistant removes them with the entry)
+- Use domain-global issue IDs for per-entry problems (entries overwrite each
+  other's issues)
 - Use repair flows for normal config changes (use reconfigure instead)
