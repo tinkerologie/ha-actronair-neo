@@ -730,3 +730,109 @@ class TestActronZoneClimate:
         attrs = zone_climate.extra_state_attributes
         assert attrs["zone_name"] == "Living Room"
         assert "supports_temperature_control" in attrs
+
+
+class TestClimateBranchCoverage:
+    """Targeted tests for remaining climate branches."""
+
+    def test_system_limits_heat_mode_and_bad_data(self, system_climate, mock_status):
+        """Heat mode uses heat limits; malformed limits fall back to defaults."""
+        main = mock_status["main"]
+        main.update(is_on=True, mode="HEAT", min_temp_heat=12.0, max_temp_heat=28.0)
+        assert system_climate.min_temp == 12.0
+        assert system_climate.max_temp == 28.0
+        main.update(min_temp_heat="bad", max_temp_heat="bad")
+        assert system_climate.min_temp == 10
+        assert system_climate.max_temp == 30
+
+    def test_hvac_modes_from_supported_list(self, system_climate, mock_status):
+        """Duplicate mapped modes are collapsed; dry flag appends DRY once."""
+        main = mock_status["main"]
+        main["supported_hvac_modes"] = ["COOL", "COOL", "UNKNOWN"]
+        main["dry_mode_supported"] = True
+        assert system_climate.hvac_modes == [
+            HVACMode.OFF,
+            HVACMode.COOL,
+            HVACMode.DRY,
+        ]
+        main["supported_hvac_modes"] = ["COOL", "DRY"]
+        assert system_climate.hvac_modes.count(HVACMode.DRY) == 1
+
+    def test_hvac_modes_fallback_with_dry_and_bad_data(
+        self, system_climate, mock_status
+    ):
+        """No supported list uses base modes; malformed data is tolerated."""
+        main = mock_status["main"]
+        main.pop("supported_hvac_modes", None)
+        main["dry_mode_supported"] = True
+        assert HVACMode.DRY in system_climate.hvac_modes
+        system_climate.coordinator.data = {}
+        assert HVACMode.DRY not in system_climate.hvac_modes
+        system_climate.coordinator.data = mock_status
+
+    def test_fan_modes_custom_subset(self, system_climate, mock_status):
+        """A subset that is neither base nor advance keeps its own order."""
+        mock_status["main"]["supported_fan_modes"] = ["HIGH", "LOW"]
+        assert system_climate.fan_modes == ["high", "low"]
+
+    def test_zone_dry_mode_added(self, coordinator, mock_status):
+        """Zones offer DRY when the system supports it."""
+        mock_status["main"]["dry_mode_supported"] = True
+        climate = ActronZoneClimate(coordinator, "zone_1")
+        assert HVACMode.DRY in climate.hvac_modes
+
+    def test_zone_bounds_without_numeric_master_target(self, zone_climate, mock_status):
+        """A non-numeric master target skips variance-based bounds."""
+        main = mock_status["main"]
+        main.update(
+            mode="COOL",
+            temp_setpoint_cool=None,
+            min_temp_cool=16.0,
+            max_temp_cool=32.0,
+            zone_temp_variance=2.0,
+        )
+        zone = mock_status["zones"]["zone_1"]
+        zone.update(min_cool_setpoint=None, max_cool_setpoint=None)
+        assert zone_climate.min_temp == 16.0
+        assert zone_climate.max_temp == 32.0
+
+    def test_zone_bounds_malformed_and_inverted(self, zone_climate, mock_status):
+        """Malformed data falls back; inverted bounds use system limits."""
+        main = mock_status["main"]
+        main.update(mode="COOL", min_temp_cool=16.0, max_temp_cool=32.0)
+        zone = mock_status["zones"]["zone_1"]
+        zone.update(min_cool_setpoint=30.0, max_cool_setpoint=20.0)
+        assert (zone_climate.min_temp, zone_climate.max_temp) == (16.0, 32.0)
+
+        main["min_temp_cool"] = "bad"
+        assert (zone_climate.min_temp, zone_climate.max_temp) == (10, 30)
+
+    def test_zone_target_none_for_other_mode(self, coordinator, mock_status):
+        """Separate-target zones have no target outside COOL/HEAT/AUTO."""
+        cap = mock_status["zones"]["zone_1"]["capabilities"]
+        mock_status["zones"]["zone_1"]["capabilities"] = cap.model_copy(
+            update={"has_separate_targets": True}
+        )
+        mock_status["main"]["mode"] = "FAN"
+        climate = ActronZoneClimate(coordinator, "zone_1")
+        assert climate.native_target_temperature is None
+
+    @pytest.mark.asyncio
+    async def test_zone_set_temperature_without_value(self, coordinator, mock_status):
+        """No temperature in kwargs sends nothing for either target style."""
+        coordinator.enable_zone_control = True
+        single = ActronZoneClimate(coordinator, "zone_1")
+        await single.async_set_temperature()
+
+        cap = mock_status["zones"]["zone_1"]["capabilities"]
+        mock_status["zones"]["zone_1"]["capabilities"] = cap.model_copy(
+            update={"has_separate_targets": True}
+        )
+        separate = ActronZoneClimate(coordinator, "zone_1")
+        await separate.async_set_temperature()
+        coordinator.set_zone_temperature.assert_not_called()
+
+    def test_zone_attributes_without_capabilities(self, zone_climate, mock_status):
+        """Attributes omit capabilities when the zone has none."""
+        mock_status["zones"]["zone_1"]["capabilities"] = None
+        assert "capabilities" not in zone_climate.extra_state_attributes

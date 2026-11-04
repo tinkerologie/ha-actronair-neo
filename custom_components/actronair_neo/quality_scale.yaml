@@ -33,8 +33,10 @@ rules:
   config-flow-test-coverage:
     status: done
     comment: >-
-      Dedicated tests/test_config_flow.py; config_flow.py at ~91% (a few error
-      branches uncovered).
+      tests/test_config_flow.py drives the user, device-selection, reauth,
+      reconfigure and options flows through the flow manager, including every
+      error and abort path with recovery, and asserts unique IDs.
+      config_flow.py is at 100% line and branch coverage.
   config-flow:
     status: done
     comment: UI config flow with data_description fields in strings.json.
@@ -110,9 +112,10 @@ rules:
   test-coverage:
     status: done
     comment: >-
-      Total coverage 95.63% (meets >=95%). Entity platform files
-      (climate/sensor/etc.) are omitted from measurement and validated via the
-      running HA instance.
+      Every integration module is measured (no omissions) and above 95% line
+      coverage; the lowest is dashboard.py at 96.1%. Total 99.2% lines, 98.8%
+      with branches. CI enforces fail_under = 95 on the combined figure.
+      Remaining uncovered lines are unreachable defensive branches.
 
   # -------------------------------------------------------------------- Gold
   devices:

@@ -9,14 +9,18 @@ import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.actronair_neo.api.auth import DeviceCodeResponse
 from custom_components.actronair_neo.api.models import DeviceInfo
 from custom_components.actronair_neo.config_flow import ActronairNeoConfigFlow
 from custom_components.actronair_neo.const import (
     CONF_ACCESS_TOKEN,
+    CONF_BASE_URL,
+    CONF_ENABLE_PUSH,
     CONF_ENABLE_ZONE_CONTROL,
     CONF_REFRESH_TOKEN,
+    CONF_TOKEN_EXPIRES_AT,
     DOMAIN,
 )
 from custom_components.actronair_neo.exceptions import AuthenticationError
@@ -50,6 +54,7 @@ _PATCH_API = "custom_components.actronair_neo.config_flow.ActronAirNeoApiClient"
 # which builds its own API client and calls ``get_devices()`` over the network.
 # Flow tests only assert on the flow result, so stub setup to avoid the socket.
 _PATCH_SETUP = "custom_components.actronair_neo.async_setup_entry"
+_PATCH_SESSION = "custom_components.actronair_neo.ssl_helper.async_create_clientsession"
 
 
 def _mock_auth_instance() -> MagicMock:
@@ -74,6 +79,37 @@ async def _advance_flow(hass: HomeAssistant, flow_id: str) -> dict:
     ):
         await hass.async_block_till_done()
         result = await hass.config_entries.flow.async_configure(result["flow_id"])
+    return result
+
+
+async def _finish_progress(hass: HomeAssistant, result: dict) -> dict:
+    """Advance a flow only if it is still showing progress."""
+    if result["type"] in (
+        FlowResultType.SHOW_PROGRESS,
+        FlowResultType.SHOW_PROGRESS_DONE,
+    ):
+        return await _advance_flow(hass, result["flow_id"])
+    await hass.async_block_till_done()
+    return result
+
+
+async def _run_successful_user_flow(
+    hass: HomeAssistant, mock_auth: MagicMock | None = None
+) -> dict:
+    """Run a complete single-device user flow and return the final result."""
+    mock_auth = mock_auth or _mock_auth_instance()
+    mock_api = MagicMock()
+    mock_api.get_devices = AsyncMock(return_value=[MOCK_DEVICE_1])
+    with (
+        patch(_PATCH_AUTH, return_value=mock_auth),
+        patch(_PATCH_API, return_value=mock_api),
+        patch(_PATCH_SETUP, return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await _advance_flow(hass, result["flow_id"])
+        await hass.async_block_till_done()
     return result
 
 
@@ -125,6 +161,8 @@ class TestActronConfigFlow:
             result = await _advance_flow(hass, result["flow_id"])
 
         assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["result"].unique_id == MOCK_SERIAL
+        assert result["data"][CONF_TOKEN_EXPIRES_AT] == 9999999999.0
         assert result["title"] == f"ActronAir Neo ({MOCK_DEVICE_1.name})"
         assert result["data"]["serial_number"] == MOCK_SERIAL
         assert result["data"]["system_id"] == "12345"
@@ -133,8 +171,10 @@ class TestActronConfigFlow:
         assert result["options"][CONF_ENABLE_ZONE_CONTROL] is False
 
     @pytest.mark.asyncio
-    async def test_multiple_devices_shows_selection(self, hass: HomeAssistant) -> None:
-        """Test device selection step when multiple devices found."""
+    async def test_multiple_devices_select_creates_entry(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Multiple devices show a selection form; picking one creates it."""
         mock_auth = _mock_auth_instance()
         mock_api = MagicMock()
         mock_api.get_devices = AsyncMock(return_value=[MOCK_DEVICE_1, MOCK_DEVICE_2])
@@ -142,6 +182,7 @@ class TestActronConfigFlow:
         with (
             patch(_PATCH_AUTH, return_value=mock_auth),
             patch(_PATCH_API, return_value=mock_api),
+            patch(_PATCH_SETUP, return_value=True),
         ):
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -149,8 +190,18 @@ class TestActronConfigFlow:
 
             result = await _advance_flow(hass, result["flow_id"])
 
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "select_device"
+            assert result["type"] == FlowResultType.FORM
+            assert result["step_id"] == "select_device"
+
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], {"device": MOCK_DEVICE_2.serial}
+            )
+            await hass.async_block_till_done()
+
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["result"].unique_id == MOCK_DEVICE_2.serial
+        assert result["title"] == f"ActronAir Neo ({MOCK_DEVICE_2.name})"
+        assert result["data"]["system_id"] == MOCK_DEVICE_2.id
 
     @pytest.mark.asyncio
     async def test_device_code_request_fails(self, hass: HomeAssistant) -> None:
@@ -168,30 +219,88 @@ class TestActronConfigFlow:
         assert result["type"] == FlowResultType.ABORT
         assert result["reason"] == "cannot_connect"
 
+        # An aborted flow cannot resume; a fresh flow succeeds.
+        result = await _run_successful_user_flow(hass)
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["result"].unique_id == MOCK_SERIAL
+
     @pytest.mark.asyncio
-    async def test_authorization_timeout_shows_error_step(
+    async def test_connection_error_then_retry_creates_entry(
         self, hass: HomeAssistant
     ) -> None:
-        """Test that auth failure transitions to connection_error step."""
+        """AuthenticationError while polling shows connection_error; retry works."""
         mock_auth = _mock_auth_instance()
         mock_auth.poll_for_token = AsyncMock(
-            side_effect=AuthenticationError("Device code authorization timed out")
+            side_effect=[
+                AuthenticationError("Device code authorization failed"),
+                MOCK_TOKEN_RESPONSE,
+            ]
         )
+        mock_api = MagicMock()
+        mock_api.get_devices = AsyncMock(return_value=[MOCK_DEVICE_1])
 
-        with patch(_PATCH_AUTH, return_value=mock_auth):
+        with (
+            patch(_PATCH_AUTH, return_value=mock_auth) as auth_cls,
+            patch(_PATCH_API, return_value=mock_api),
+            patch(_PATCH_SETUP, return_value=True),
+        ):
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": config_entries.SOURCE_USER}
             )
-
             result = await _advance_flow(hass, result["flow_id"])
 
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "connection_error"
+            assert result["type"] == FlowResultType.FORM
+            assert result["step_id"] == "connection_error"
+
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], {}
+            )
+            result = await _finish_progress(hass, result)
+
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["result"].unique_id == MOCK_SERIAL
+        # connection_error resets auth state, so a new device code is requested.
+        assert auth_cls.call_count == 2
+        assert mock_auth.request_device_code.await_count == 2
 
     @pytest.mark.asyncio
+    async def test_timeout_then_retry_creates_entry(self, hass: HomeAssistant) -> None:
+        """A non-auth polling failure shows timeout; retry reuses the device code."""
+        mock_auth = _mock_auth_instance()
+        mock_auth.poll_for_token = AsyncMock(
+            side_effect=[TimeoutError("expired"), MOCK_TOKEN_RESPONSE]
+        )
+        mock_api = MagicMock()
+        mock_api.get_devices = AsyncMock(return_value=[MOCK_DEVICE_1])
+
+        with (
+            patch(_PATCH_AUTH, return_value=mock_auth),
+            patch(_PATCH_API, return_value=mock_api),
+            patch(_PATCH_SETUP, return_value=True),
+        ):
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": config_entries.SOURCE_USER}
+            )
+            result = await _advance_flow(hass, result["flow_id"])
+
+            assert result["type"] == FlowResultType.FORM
+            assert result["step_id"] == "timeout"
+
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], {}
+            )
+            result = await _finish_progress(hass, result)
+
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["result"].unique_id == MOCK_SERIAL
+        assert mock_auth.request_device_code.await_count == 1
+        assert mock_auth.poll_for_token.await_count == 2
+
     @pytest.mark.asyncio
-    async def test_select_device_invalid_data_raises(self, hass: HomeAssistant) -> None:
-        """Test select device schema rejects unknown serial values."""
+    async def test_select_device_invalid_data_then_recovers(
+        self, hass: HomeAssistant
+    ) -> None:
+        """An unknown serial is rejected by the schema; a valid one succeeds."""
         mock_auth = _mock_auth_instance()
         mock_api = MagicMock()
         mock_api.get_devices = AsyncMock(return_value=[MOCK_DEVICE_1, MOCK_DEVICE_2])
@@ -199,6 +308,7 @@ class TestActronConfigFlow:
         with (
             patch(_PATCH_AUTH, return_value=mock_auth),
             patch(_PATCH_API, return_value=mock_api),
+            patch(_PATCH_SETUP, return_value=True),
         ):
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -209,6 +319,72 @@ class TestActronConfigFlow:
                     select_form["flow_id"],
                     {"device": "UNKNOWN"},
                 )
+            result = await hass.config_entries.flow.async_configure(
+                select_form["flow_id"], {"device": MOCK_SERIAL}
+            )
+            await hass.async_block_till_done()
+
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["result"].unique_id == MOCK_SERIAL
+
+    @pytest.mark.asyncio
+    async def test_already_configured_aborts(
+        self, hass: HomeAssistant, mock_config_entry: MockConfigEntry
+    ) -> None:
+        """A device that already has an entry aborts the user flow."""
+        mock_auth = _mock_auth_instance()
+        mock_api = MagicMock()
+        mock_api.get_devices = AsyncMock(return_value=[MOCK_DEVICE_1])
+
+        with (
+            patch(_PATCH_AUTH, return_value=mock_auth),
+            patch(_PATCH_API, return_value=mock_api),
+        ):
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": config_entries.SOURCE_USER}
+            )
+            result = await _advance_flow(hass, result["flow_id"])
+
+        assert result["type"] == FlowResultType.ABORT
+        assert result["reason"] == "already_configured"
+        assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+    @pytest.mark.asyncio
+    async def test_entry_without_token_expiry(self, hass: HomeAssistant) -> None:
+        """A missing token expiry is stored as 0.0."""
+        mock_auth = _mock_auth_instance()
+        mock_auth.token_expires_at = None
+
+        result = await _run_successful_user_flow(hass, mock_auth=mock_auth)
+
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["result"].unique_id == MOCK_SERIAL
+        assert result["data"][CONF_TOKEN_EXPIRES_AT] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_finish_auth_get_devices_fails_aborts(
+        self, hass: HomeAssistant
+    ) -> None:
+        """get_devices failure aborts with cannot_connect; a new flow succeeds."""
+        mock_auth = _mock_auth_instance()
+        mock_api = MagicMock()
+        mock_api.get_devices = AsyncMock(side_effect=Exception("boom"))
+
+        with (
+            patch(_PATCH_AUTH, return_value=mock_auth),
+            patch(_PATCH_API, return_value=mock_api),
+        ):
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": config_entries.SOURCE_USER}
+            )
+            result = await _advance_flow(hass, result["flow_id"])
+
+        assert result["type"] == FlowResultType.ABORT
+        assert result["reason"] == "cannot_connect"
+
+        result = await _run_successful_user_flow(hass)
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["result"].unique_id == MOCK_SERIAL
 
     @pytest.mark.asyncio
     async def test_finish_auth_no_devices_aborts(self, hass: HomeAssistant) -> None:
@@ -229,26 +405,363 @@ class TestActronConfigFlow:
         assert result["type"] == FlowResultType.ABORT
         assert result["reason"] == "no_devices"
 
+        result = await _run_successful_user_flow(hass)
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["result"].unique_id == MOCK_SERIAL
+
+
+class TestReauthFlow:
+    """Reauth flow journeys through the flow manager."""
+
+    @staticmethod
+    def _new_auth(expires_at: float | None) -> MagicMock:
+        auth = _mock_auth_instance()
+        auth.access_token = "new_access_token"
+        auth.refresh_token_value = "new_refresh_token"
+        if expires_at is None:
+            auth.token_expires_at = None
+        else:
+            auth.token_expires_at.timestamp.return_value = expires_at
+        return auth
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("expires_at", "expected_expiry"),
+        [(1234567890.0, 1234567890.0), (None, 0.0)],
+        ids=["with_expiry", "without_expiry"],
+    )
+    async def test_reauth_updates_tokens(
+        self,
+        hass: HomeAssistant,
+        mock_config_entry: MockConfigEntry,
+        expires_at: float | None,
+        expected_expiry: float,
+    ) -> None:
+        """Reauth stores the new tokens and keeps the entry's unique ID."""
+        mock_auth = self._new_auth(expires_at)
+
+        with (
+            patch(_PATCH_AUTH, return_value=mock_auth),
+            patch(_PATCH_SETUP, return_value=True),
+        ):
+            result = await mock_config_entry.start_reauth_flow(hass)
+            assert result["type"] == FlowResultType.FORM
+            assert result["step_id"] == "reauth_confirm"
+
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], {}
+            )
+            result = await _finish_progress(hass, result)
+            await hass.async_block_till_done()
+
+        assert result["type"] == FlowResultType.ABORT
+        assert result["reason"] == "reauth_successful"
+        assert mock_config_entry.unique_id == MOCK_SERIAL
+        assert mock_config_entry.data[CONF_ACCESS_TOKEN] == "new_access_token"
+        assert mock_config_entry.data[CONF_REFRESH_TOKEN] == "new_refresh_token"
+        assert mock_config_entry.data[CONF_TOKEN_EXPIRES_AT] == expected_expiry
+
+
+MOCK_DEVICE_1_RECONF = DeviceInfo(
+    serial=MOCK_SERIAL,
+    name="Living Room AC",
+    type="Neo",
+    id="99999",
+    base_url="https://que.actronair.com.au",
+)
+
+
+class TestReconfigureFlow:
+    """Reconfigure flow journeys through the flow manager."""
+
+    async def _run(
+        self,
+        hass: HomeAssistant,
+        entry: MockConfigEntry,
+        get_devices: AsyncMock,
+    ) -> dict:
+        mock_auth = _mock_auth_instance()
+        mock_auth.access_token = "reconf_access_token"
+        mock_auth.refresh_token_value = "reconf_refresh_token"
+        mock_api = MagicMock()
+        mock_api.get_devices = get_devices
+        with (
+            patch(_PATCH_AUTH, return_value=mock_auth),
+            patch(_PATCH_API, return_value=mock_api),
+            patch(_PATCH_SETUP, return_value=True),
+        ):
+            result = await entry.start_reconfigure_flow(hass)
+            assert result["type"] == FlowResultType.FORM
+            assert result["step_id"] == "reconfigure"
+
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], {}
+            )
+            result = await _finish_progress(hass, result)
+            await hass.async_block_till_done()
+        return result
+
+    def _assert_reconfigured(self, entry: MockConfigEntry) -> None:
+        assert entry.unique_id == MOCK_SERIAL
+        assert entry.data[CONF_ACCESS_TOKEN] == "reconf_access_token"
+        assert entry.data[CONF_REFRESH_TOKEN] == "reconf_refresh_token"
+        assert entry.data[CONF_TOKEN_EXPIRES_AT] == 9999999999.0
+        assert entry.data[CONF_BASE_URL] == "https://que.actronair.com.au"
+        assert entry.data["system_id"] == "99999"
+
+    @pytest.mark.asyncio
+    async def test_reconfigure_success(
+        self, hass: HomeAssistant, mock_config_entry: MockConfigEntry
+    ) -> None:
+        """Reconfigure refreshes tokens and device metadata in place."""
+        result = await self._run(
+            hass,
+            mock_config_entry,
+            AsyncMock(return_value=[MOCK_DEVICE_2, MOCK_DEVICE_1_RECONF]),
+        )
+
+        assert result["type"] == FlowResultType.ABORT
+        assert result["reason"] == "reconfigure_successful"
+        self._assert_reconfigured(mock_config_entry)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("get_devices", "reason"),
+        [
+            (AsyncMock(return_value=[MOCK_DEVICE_2]), "wrong_account"),
+            (AsyncMock(side_effect=Exception("boom")), "cannot_connect"),
+        ],
+        ids=["wrong_account", "cannot_connect"],
+    )
+    async def test_reconfigure_abort_then_success(
+        self,
+        hass: HomeAssistant,
+        mock_config_entry: MockConfigEntry,
+        get_devices: AsyncMock,
+        reason: str,
+    ) -> None:
+        """Reconfigure aborts leave the entry untouched; a new attempt succeeds."""
+        original = dict(mock_config_entry.data)
+
+        result = await self._run(hass, mock_config_entry, get_devices)
+
+        assert result["type"] == FlowResultType.ABORT
+        assert result["reason"] == reason
+        assert dict(mock_config_entry.data) == original
+
+        result = await self._run(
+            hass, mock_config_entry, AsyncMock(return_value=[MOCK_DEVICE_1_RECONF])
+        )
+        assert result["reason"] == "reconfigure_successful"
+        self._assert_reconfigured(mock_config_entry)
+
 
 class TestOptionsFlow:
     """Test the options flow handler."""
 
+    @staticmethod
+    def _defaults(result: dict) -> dict:
+        return {str(key): key.default() for key in result["data_schema"].schema}
+
     @pytest.mark.asyncio
-    async def test_options_flow(self, hass: HomeAssistant, mock_config_entry) -> None:
-        """Test options flow shows form and saves changes."""
+    async def test_options_flow(
+        self, hass: HomeAssistant, mock_config_entry: MockConfigEntry
+    ) -> None:
+        """Non-default options are saved on the entry."""
         result = await hass.config_entries.options.async_init(
             mock_config_entry.entry_id
         )
         assert result["type"] == FlowResultType.FORM
         assert result["step_id"] == "init"
+        # Entry has no push option yet, so the form falls back to the default.
+        assert self._defaults(result) == {
+            CONF_ENABLE_ZONE_CONTROL: False,
+            CONF_ENABLE_PUSH: True,
+        }
 
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
-            {CONF_ENABLE_ZONE_CONTROL: False},
+            {CONF_ENABLE_ZONE_CONTROL: True, CONF_ENABLE_PUSH: False},
         )
 
         assert result["type"] == FlowResultType.CREATE_ENTRY
-        assert result["data"][CONF_ENABLE_ZONE_CONTROL] is False
+        assert result["data"] == {
+            CONF_ENABLE_ZONE_CONTROL: True,
+            CONF_ENABLE_PUSH: False,
+        }
+        assert mock_config_entry.options[CONF_ENABLE_ZONE_CONTROL] is True
+        assert mock_config_entry.options[CONF_ENABLE_PUSH] is False
+
+    @pytest.mark.asyncio
+    async def test_options_form_defaults_reflect_entry(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Form defaults come from the entry's existing options."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={},
+            options={CONF_ENABLE_ZONE_CONTROL: True, CONF_ENABLE_PUSH: False},
+            unique_id=MOCK_SERIAL,
+            version=2,
+        )
+        entry.add_to_hass(hass)
+
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+
+        assert result["type"] == FlowResultType.FORM
+        assert self._defaults(result) == {
+            CONF_ENABLE_ZONE_CONTROL: True,
+            CONF_ENABLE_PUSH: False,
+        }
+
+
+class TestSessionHelpers:
+    """Lifecycle of the flow's private aiohttp session."""
+
+    @staticmethod
+    def _session(*, closed: bool) -> MagicMock:
+        session = MagicMock()
+        session.closed = closed
+        session.close = AsyncMock()
+        return session
+
+    @pytest.mark.asyncio
+    async def test_get_session_creates_when_absent(self, hass: HomeAssistant) -> None:
+        flow = ActronairNeoConfigFlow()
+        flow.hass = hass
+        new_session = self._session(closed=False)
+        with patch(_PATCH_SESSION, AsyncMock(return_value=new_session)) as create:
+            assert await flow._async_get_session() is new_session
+        create.assert_awaited_once_with(hass)
+
+    @pytest.mark.asyncio
+    async def test_get_session_reuses_open_session(self, hass: HomeAssistant) -> None:
+        flow = ActronairNeoConfigFlow()
+        flow.hass = hass
+        existing = self._session(closed=False)
+        flow._session = existing
+        with patch(_PATCH_SESSION, AsyncMock()) as create:
+            assert await flow._async_get_session() is existing
+        create.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_get_session_recreates_closed_session(
+        self, hass: HomeAssistant
+    ) -> None:
+        flow = ActronairNeoConfigFlow()
+        flow.hass = hass
+        flow._session = self._session(closed=True)
+        new_session = self._session(closed=False)
+        with patch(_PATCH_SESSION, AsyncMock(return_value=new_session)) as create:
+            assert await flow._async_get_session() is new_session
+        create.assert_awaited_once_with(hass)
+
+    @pytest.mark.asyncio
+    async def test_close_session_closes_open_session(self) -> None:
+        flow = ActronairNeoConfigFlow()
+        session = self._session(closed=False)
+        flow._session = session
+        await flow._async_close_session()
+        session.close.assert_awaited_once()
+        assert flow._session is None
+
+    @pytest.mark.asyncio
+    async def test_close_session_skips_closed_session(self) -> None:
+        flow = ActronairNeoConfigFlow()
+        session = self._session(closed=True)
+        flow._session = session
+        await flow._async_close_session()
+        session.close.assert_not_awaited()
+        assert flow._session is None
+
+    @pytest.mark.asyncio
+    async def test_close_session_absent_is_noop(self) -> None:
+        flow = ActronairNeoConfigFlow()
+        await flow._async_close_session()
+        assert flow._session is None
+
+    @pytest.mark.asyncio
+    async def test_real_session_lifecycle(self, hass: HomeAssistant) -> None:
+        """The real certifi-backed session opens without network and closes."""
+        flow = ActronairNeoConfigFlow()
+        flow.hass = hass
+        session = await flow._async_get_session()
+        assert not session.closed
+        assert await flow._async_get_session() is session
+        await flow._async_close_session()
+        assert session.closed
+        assert flow._session is None
+
+
+class TestUninitializedGuards:
+    """Defensive RuntimeError guards for uninitialized flow state."""
+
+    @staticmethod
+    def _flow_capturing_task() -> tuple[ActronairNeoConfigFlow, list]:
+        """Flow whose hass captures the authorization coroutine un-scheduled."""
+        flow = ActronairNeoConfigFlow()
+        flow.hass = MagicMock()
+        captured: list = []
+
+        def _capture(coro):
+            captured.append(coro)
+            task = MagicMock()
+            task.done.return_value = False
+            return task
+
+        flow.hass.async_create_task = MagicMock(side_effect=_capture)
+        flow.async_show_progress = MagicMock(return_value={"type": "progress"})
+        flow._auth = _mock_auth_instance()
+        flow._device_code_response = MOCK_DEVICE_CODE_RESPONSE
+        return flow, captured
+
+    @pytest.mark.asyncio
+    async def test_wait_for_authorization_without_auth(self) -> None:
+        flow, captured = self._flow_capturing_task()
+        await flow.async_step_user()
+        flow._auth = None
+        with pytest.raises(RuntimeError, match="Auth object is not initialized"):
+            await captured[0]
+
+    @pytest.mark.asyncio
+    async def test_wait_for_authorization_without_device_code(self) -> None:
+        flow, captured = self._flow_capturing_task()
+        await flow.async_step_user()
+        flow._device_code_response = None
+        with pytest.raises(
+            RuntimeError, match="Device code response is not initialized"
+        ):
+            await captured[0]
+
+    @pytest.mark.asyncio
+    async def test_user_step_progress_without_device_code(self) -> None:
+        flow = ActronairNeoConfigFlow()
+        flow._auth = _mock_auth_instance()
+        flow._device_code_response = None
+        flow.login_task = MagicMock()
+        flow.login_task.done.return_value = False
+        with pytest.raises(
+            RuntimeError, match="Device code response is not initialized"
+        ):
+            await flow.async_step_user()
+
+    @pytest.mark.asyncio
+    async def test_finish_auth_without_auth(self) -> None:
+        flow = ActronairNeoConfigFlow()
+        with pytest.raises(RuntimeError, match="Auth object is not initialized"):
+            await flow.async_step_finish_auth()
+
+    @pytest.mark.asyncio
+    async def test_create_device_entry_without_auth(self) -> None:
+        flow = ActronairNeoConfigFlow()
+        with pytest.raises(RuntimeError, match="Auth object is not initialized"):
+            await flow._async_create_device_entry(MOCK_DEVICE_1)
+
+    @pytest.mark.asyncio
+    async def test_reconfigure_entry_without_auth(self) -> None:
+        flow = ActronairNeoConfigFlow()
+        with pytest.raises(RuntimeError, match="Auth object is not initialized"):
+            await flow._async_reconfigure_entry()
 
 
 class TestConfigFlowDirectMethods:
