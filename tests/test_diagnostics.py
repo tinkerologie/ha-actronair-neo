@@ -24,7 +24,6 @@ async def test_diagnostics(
     mock_config_entry,
     mock_api,
     mock_ac_status_response,
-    enable_custom_integrations,
 ):
     """Test diagnostics output."""
     mock_api.get_ac_status = AsyncMock(return_value=mock_ac_status_response)
@@ -45,7 +44,6 @@ async def test_diagnostics_no_coordinator_data(
     mock_config_entry,
     mock_api,
     mock_ac_status_response,
-    enable_custom_integrations,
 ):
     """Test diagnostics when coordinator data is None."""
     mock_api.get_ac_status = AsyncMock(return_value=mock_ac_status_response)
@@ -262,7 +260,6 @@ async def test_diagnostics_includes_push_block(
     mock_config_entry,
     mock_api,
     mock_ac_status_response,
-    enable_custom_integrations,
 ):
     """Diagnostics output includes a push health block."""
     mock_api.get_ac_status = AsyncMock(return_value=mock_ac_status_response)
@@ -285,7 +282,6 @@ async def test_diagnostics_push_redacts_sensitive_keys(
     mock_config_entry,
     mock_api,
     mock_ac_status_response,
-    enable_custom_integrations,
 ):
     """Sensitive push/connection keys are in the redaction set and tokens don't leak."""
     assert {"endpoint", "user_id", "userId"}.issubset(TO_REDACT)
@@ -306,7 +302,6 @@ async def test_diagnostics_push_block_live_transport(
     mock_config_entry,
     mock_api,
     mock_ac_status_response,
-    enable_custom_integrations,
 ):
     """Diagnostics serialize a live transport's heartbeat/reconnect/error."""
     from custom_components.actronair_neo.api.push.models import PushState
@@ -343,7 +338,6 @@ async def test_diagnostics_includes_electrical_block(
     mock_config_entry,
     mock_api,
     mock_ac_status_response,
-    enable_custom_integrations,
 ):
     """Diagnostics export raw and normalised electrical telemetry (#200)."""
     mock_api.get_ac_status = AsyncMock(return_value=mock_ac_status_response)

@@ -81,9 +81,7 @@ class TestActronConfigFlow:
     """Test the ActronAir Neo config flow (device code auth)."""
 
     @pytest.mark.asyncio
-    async def test_user_step_starts_device_code_flow(
-        self, hass: HomeAssistant, enable_custom_integrations
-    ) -> None:
+    async def test_user_step_starts_device_code_flow(self, hass: HomeAssistant) -> None:
         """Test user step requests device code and shows progress."""
         mock_auth = _mock_auth_instance()
         # Make poll_for_token block (never completes during test)
@@ -108,9 +106,7 @@ class TestActronConfigFlow:
         )
 
     @pytest.mark.asyncio
-    async def test_single_device_creates_entry(
-        self, hass: HomeAssistant, enable_custom_integrations
-    ) -> None:
+    async def test_single_device_creates_entry(self, hass: HomeAssistant) -> None:
         """Test auto-creation when only one device is found."""
         mock_auth = _mock_auth_instance()
         mock_api = MagicMock()
@@ -137,9 +133,7 @@ class TestActronConfigFlow:
         assert result["options"][CONF_ENABLE_ZONE_CONTROL] is False
 
     @pytest.mark.asyncio
-    async def test_multiple_devices_shows_selection(
-        self, hass: HomeAssistant, enable_custom_integrations
-    ) -> None:
+    async def test_multiple_devices_shows_selection(self, hass: HomeAssistant) -> None:
         """Test device selection step when multiple devices found."""
         mock_auth = _mock_auth_instance()
         mock_api = MagicMock()
@@ -159,9 +153,7 @@ class TestActronConfigFlow:
         assert result["step_id"] == "select_device"
 
     @pytest.mark.asyncio
-    async def test_device_code_request_fails(
-        self, hass: HomeAssistant, enable_custom_integrations
-    ) -> None:
+    async def test_device_code_request_fails(self, hass: HomeAssistant) -> None:
         """Test abort when device code request fails."""
         mock_auth = MagicMock()
         mock_auth.request_device_code = AsyncMock(
@@ -178,7 +170,7 @@ class TestActronConfigFlow:
 
     @pytest.mark.asyncio
     async def test_authorization_timeout_shows_error_step(
-        self, hass: HomeAssistant, enable_custom_integrations
+        self, hass: HomeAssistant
     ) -> None:
         """Test that auth failure transitions to connection_error step."""
         mock_auth = _mock_auth_instance()
@@ -198,9 +190,7 @@ class TestActronConfigFlow:
 
     @pytest.mark.asyncio
     @pytest.mark.asyncio
-    async def test_select_device_invalid_data_raises(
-        self, hass: HomeAssistant, enable_custom_integrations
-    ) -> None:
+    async def test_select_device_invalid_data_raises(self, hass: HomeAssistant) -> None:
         """Test select device schema rejects unknown serial values."""
         mock_auth = _mock_auth_instance()
         mock_api = MagicMock()
@@ -221,9 +211,7 @@ class TestActronConfigFlow:
                 )
 
     @pytest.mark.asyncio
-    async def test_finish_auth_no_devices_aborts(
-        self, hass: HomeAssistant, enable_custom_integrations
-    ) -> None:
+    async def test_finish_auth_no_devices_aborts(self, hass: HomeAssistant) -> None:
         """Test finish auth aborts when no devices are returned."""
         mock_auth = _mock_auth_instance()
         mock_api = MagicMock()
@@ -246,9 +234,7 @@ class TestOptionsFlow:
     """Test the options flow handler."""
 
     @pytest.mark.asyncio
-    async def test_options_flow(
-        self, hass: HomeAssistant, mock_config_entry, enable_custom_integrations
-    ) -> None:
+    async def test_options_flow(self, hass: HomeAssistant, mock_config_entry) -> None:
         """Test options flow shows form and saves changes."""
         result = await hass.config_entries.options.async_init(
             mock_config_entry.entry_id

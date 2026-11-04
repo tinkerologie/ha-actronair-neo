@@ -45,9 +45,6 @@ if TYPE_CHECKING:
 
 PARALLEL_UPDATES = 0
 
-# HA 2026.11 introduced native climate temperatures; 2026.10 reads legacy names.
-_HAS_NATIVE_TEMPERATURES = hasattr(ClimateEntity, "native_current_temperature")
-
 _LOGGER = logging.getLogger(__name__)
 
 BASE_HVAC_MODES = [
@@ -105,10 +102,7 @@ class ActronClimate(ActronAirNeoEntity, ClimateEntity):
 
     dashboard_role = DashboardRole.SYSTEM_CLIMATE
 
-    if _HAS_NATIVE_TEMPERATURES:
-        _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
-    else:
-        _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
 
     def __init__(self, coordinator: ActronDataCoordinator) -> None:
         """Initialize the climate entity."""
@@ -217,11 +211,6 @@ class ActronClimate(ActronAirNeoEntity, ClimateEntity):
         if self.hvac_mode == HVACMode.HEAT:
             return self.coordinator.data["main"]["temp_setpoint_heat"]
         return None
-
-    # Runtime descriptor aliases; static checkers use ClimateEntity declarations.
-    if not TYPE_CHECKING and not _HAS_NATIVE_TEMPERATURES:
-        current_temperature = native_current_temperature
-        target_temperature = native_target_temperature
 
     @property
     def hvac_mode(self) -> HVACMode:
@@ -350,10 +339,7 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
 
     dashboard_role = DashboardRole.ZONE_CLIMATE
 
-    if _HAS_NATIVE_TEMPERATURES:
-        _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
-    else:
-        _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
 
     def __init__(self, coordinator: ActronDataCoordinator, zone_id: str) -> None:
         """Initialize the zone climate entity."""
@@ -651,13 +637,6 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
             return None
 
         return self.coordinator.data["zones"][self.zone_id]["temp_setpoint_heat"]
-
-    # Runtime descriptor aliases; static checkers use ClimateEntity declarations.
-    if not TYPE_CHECKING and not _HAS_NATIVE_TEMPERATURES:
-        current_temperature = native_current_temperature
-        target_temperature = native_target_temperature
-        target_temperature_high = native_target_temperature_high
-        target_temperature_low = native_target_temperature_low
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""

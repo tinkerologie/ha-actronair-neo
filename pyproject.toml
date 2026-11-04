@@ -21,15 +21,17 @@ classifiers = [
 dependencies = [
     "aiofiles",
     "aiomqtt>=2.0.0",
+    "pydantic>=2.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    # Floor includes the 2026.6.0 pre-releases so the lock can resolve alongside
-    # pytest-homeassistant-custom-component, which pins Home Assistant exactly and
-    # ships beta-matched builds before the stable one. The bootstrap installs the
-    # newest stable at runtime; this lower bound only affects uv resolution.
-    "homeassistant>=2026.10.0,<2027",
+    # Exact pin, paired with the pytest-homeassistant Core commit in
+    # [tool.uv.sources]: the plugin must match the Home Assistant release it was
+    # built from. Update both together (Dependabot ignores homeassistant). The pin
+    # lives here, not in the test extra, so HA Next can install `.[test]` with its
+    # own channel-specific Home Assistant and plugin.
+    "homeassistant==2026.11.0",
     "colorlog>=6.12.0",
     "pre-commit>=4.6.1",
     "pyright>=1.1.411",
@@ -41,7 +43,8 @@ test = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=4.1.0",
-    "pytest-homeassistant-custom-component>=0.13.348",
+    "pytest-freezer>=0.4.9",
+    "pytest-homeassistant",
     "pytest-timeout>=2.2.0",
     "pytest-xdist>=3.5.0",
     "freezegun>=1.2.0",
@@ -63,6 +66,13 @@ python-preference = "managed"
 # imports it), so override the pin until Home Assistant moves to Pillow 13.
 override-dependencies = ["pillow>=13.0.0"]
 
+[tool.uv.sources]
+# Home Assistant's official test plugin ships inside Core. The 2026.11.0 PyPI
+# upload failed (home-assistant/core#190470), so install it from the commit
+# tagged 2026.11.0 until a matching PyPI release exists, then switch to an
+# exact `pytest-homeassistant==<HA version>` pin and drop this source.
+pytest-homeassistant = { git = "https://github.com/home-assistant/core.git", rev = "74cf5a49c63ed8d4d87717844bf14f79c28c9cea", subdirectory = "packages/pytest-homeassistant" }
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = [".git", "custom_components"]
@@ -71,8 +81,14 @@ asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     'error::DeprecationWarning:custom_components\.actronair_neo(\.|$)',
     'error::PendingDeprecationWarning:custom_components\.actronair_neo(\.|$)',
+    # Third-party import-time warnings from Home Assistant's own dependency tree
+    # (not actionable here); HA Core's test suite ignores them too.
+    'ignore:Inheritance class HomeAssistantApplication from web.Application is discouraged:DeprecationWarning',
+    'ignore:.asyncio.iscoroutinefunction. is deprecated:DeprecationWarning:backoff',
 ]
 addopts = [
+    # Let Home Assistant install its httpx alias before respx is imported.
+    "-p", "no:respx",
     "--strict-markers",
     "-ra",
     "-v",

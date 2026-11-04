@@ -33,7 +33,6 @@ async def test_setup_entry_success(
     mock_config_entry,
     mock_api,
     mock_ac_status_response,
-    enable_custom_integrations,
 ):
     """Test successful setup of a config entry."""
     mock_api.get_ac_status = AsyncMock(return_value=mock_ac_status_response)
@@ -47,9 +46,7 @@ async def test_setup_entry_success(
     assert mock_config_entry.runtime_data is not None
 
 
-async def test_setup_entry_auth_error(
-    hass, mock_config_entry, mock_api, enable_custom_integrations
-):
+async def test_setup_entry_auth_error(hass, mock_config_entry, mock_api):
     """Test setup raises ConfigEntryNotReady on auth error."""
     mock_api.initialize = AsyncMock(side_effect=AuthenticationError("Auth failed"))
 
@@ -61,9 +58,7 @@ async def test_setup_entry_auth_error(
     assert mock_config_entry.state is ConfigEntryState.SETUP_ERROR
 
 
-async def test_setup_entry_api_error(
-    hass, mock_config_entry, mock_api, enable_custom_integrations
-):
+async def test_setup_entry_api_error(hass, mock_config_entry, mock_api):
     """Test setup retries on API error."""
     mock_api.initialize = AsyncMock(side_effect=ApiError("Connection error"))
 
@@ -80,7 +75,6 @@ async def test_unload_entry(
     mock_config_entry,
     mock_api,
     mock_ac_status_response,
-    enable_custom_integrations,
 ):
     """Test unloading a config entry."""
     mock_api.get_ac_status = AsyncMock(return_value=mock_ac_status_response)
@@ -438,7 +432,6 @@ async def test_setup_entry_starts_push(
     mock_config_entry,
     mock_api,
     mock_ac_status_response,
-    enable_custom_integrations,
 ):
     """async_setup_entry starts the push transport."""
     mock_api.get_ac_status = AsyncMock(return_value=mock_ac_status_response)
@@ -460,7 +453,6 @@ async def test_unload_entry_stops_push(
     mock_config_entry,
     mock_api,
     mock_ac_status_response,
-    enable_custom_integrations,
 ):
     """Unloading the entry stops the push transport."""
     mock_api.get_ac_status = AsyncMock(return_value=mock_ac_status_response)
@@ -483,7 +475,6 @@ async def test_setup_entry_push_disabled_skips_discovery(
     mock_config_entry,
     mock_api,
     mock_ac_status_response,
-    enable_custom_integrations,
 ):
     """With enable_push=False, setup completes and no push discovery runs."""
     mock_api.get_ac_status = AsyncMock(return_value=mock_ac_status_response)

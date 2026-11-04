@@ -137,27 +137,12 @@ if uv pip show ha-actronair-neo >/dev/null 2>&1; then
     uv pip uninstall -y ha-actronair-neo >/dev/null 2>&1 || true
 fi
 
-# Sync the active environment and install the project non-editably to avoid
-# __editable__ path hooks that break Home Assistant discovery.
-uv sync --active --all-extras --no-editable
-
-# Always keep Home Assistant and the pytest HA test harness current in range.
-#
-# pytest-homeassistant-custom-component (PHCC) pins Home Assistant *exactly* and
-# briefly trails new stable releases (it ships beta-matched builds first). If we
-# upgrade Home Assistant ahead of PHCC, an unconstrained
-# `uv pip install pytest-homeassistant-custom-component` silently backtracks PHCC
-# to an ancient release with broken pins (e.g. pytest 6.x that won't run on
-# modern Python). So install the harness first — allowing its pre-release HA pin
-# to pull the matching pytest/respx/syrupy stack — then move Home Assistant up to
-# the newest stable in range without disturbing those test dependencies.
-HA_VERSION_SPEC="homeassistant>=2026.4,<2027"
-
-log_header "Updating test harness + Home Assistant to latest supported versions"
-log_info "Installing pytest-homeassistant-custom-component (matched test stack)"
-uv pip install --upgrade --prerelease=allow "pytest-homeassistant-custom-component>=0.13.0"
-log_info "Target Home Assistant spec: $HA_VERSION_SPEC"
-uv pip install --upgrade --no-deps "$HA_VERSION_SPEC"
+# Sync the active environment to the lockfile and install the project
+# non-editably to avoid __editable__ path hooks that break Home Assistant
+# discovery. The lock pins Home Assistant together with the matching official
+# pytest-homeassistant plugin; an exact sync also removes packages that are no
+# longer declared, such as the retired pytest-homeassistant-custom-component.
+uv sync --active --all-extras --no-editable --locked
 
 INSTALLED_HA_VERSION="$(python -c 'import homeassistant.const as c; print(c.__version__)')"
 log_info "Installed Home Assistant version: $INSTALLED_HA_VERSION"

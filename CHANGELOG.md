@@ -17,7 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Climate entities expose native temperature properties on Home Assistant 2026.11+, preserving Celsius reporting on 2026.10 through conditional legacy aliases. Entity categories use the canonical Home Assistant import. Local Hassfest validation supports the new `packages/hassfest` layout and refreshes Core `dev` on each run (#210).
+- **Requires Home Assistant 2026.11.0 or later.** Climate entities use Home Assistant 2026.11's native temperature properties directly; the Home Assistant 2026.10 compatibility aliases are removed. HACS keeps users on older Home Assistant versions on the previous release.
+
+- Development: tests use Home Assistant's official `pytest-homeassistant` plugin instead of the retiring `pytest-homeassistant-custom-component`, which has no Home Assistant 2026.11 release. The dev lock pins Home Assistant 2026.11.0 and installs the plugin from the Core commit tagged 2026.11.0, because its PyPI upload failed (home-assistant/core#190470); switch to an exact PyPI pin once it is published. Bootstrap now runs a locked sync. `pydantic` is declared explicitly, as the manifest requires, rather than arriving through the old harness. HA Next finds the plugin per channel (PyPI release or Core tag), runs tests against Core `dev` with the in-tree plugin from the same commit, and reports the plugin source or the reason tests were skipped (#218).
+
+- Climate entities expose native temperature properties. Entity categories use the canonical Home Assistant import. Local Hassfest validation supports the new `packages/hassfest` layout and refreshes Core `dev` on each run (#210).
 
 - HACS and the Marketplace install the fixed-name `actronair_neo.zip` release asset, enabling asset download counts. Integration files are at the ZIP root; `SHA256SUMS` accompanies the reproducible archive. Releases separate attested builds from verified publication, publish through a draft, and verify release immutability. Selecting older releases without this asset can fail to download (#209).
 

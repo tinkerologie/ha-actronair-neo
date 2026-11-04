@@ -31,26 +31,22 @@ jobs:
           persist-credentials: false
       - name: Set up uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-      - name: Resolve newest PyPI release
+      - name: Resolve channel versions and test plugin
         id: resolve
-        if: matrix.channel == 'pypi'
         continue-on-error: true
-        run: uv run --no-project --with packaging script/ha-next/resolve_versions.py
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: uv run --no-project --with packaging script/ha-next/resolve_versions.py "$CHANNEL"
       - name: Install channel
         id: install
         continue-on-error: true
         env:
-          CHANNEL: ${{ matrix.channel }}
-          HA_VERSION: ${{ steps.resolve.outputs.ha_version }}
+          HA_SPEC: ${{ steps.resolve.outputs.ha_spec }}
         run: |
           uv venv --python "$(cat .python-version)" "$HA_NEXT_ENV"
-          if [[ "$CHANNEL" == pypi ]]; then
-            test -n "$HA_VERSION"
-            PACKAGE="homeassistant==$HA_VERSION"
-          else
-            PACKAGE='homeassistant @ https://github.com/home-assistant/core/archive/refs/heads/dev.tar.gz'
-          fi
-          uv pip install --python "$HA_NEXT_ENV/bin/python" "$PACKAGE" \
+          test -n "$HA_SPEC"
+          uv pip install --python "$HA_NEXT_ENV/bin/python" "$HA_SPEC" \
             'aiomqtt>=2.0.0' 'pydantic>=2.0.0' aiofiles
           uv pip install --python "$HA_NEXT_ENV/bin/python" --no-deps .
       - name: Import smoke check
@@ -74,28 +70,32 @@ jobs:
             test -n "$HA_VERSION"
           fi
           script/hassfest
-      - name: Tests with matching harness
+      - name: Tests with matching plugin
         id: tests
-        if: matrix.channel == 'pypi' && steps.resolve.outputs.harness_version != '' && steps.install.outcome == 'success'
+        if: steps.resolve.outputs.harness_spec != '' && steps.install.outcome == 'success'
         continue-on-error: true
         env:
-          HA_VERSION: ${{ steps.resolve.outputs.ha_version }}
-          HARNESS_VERSION: ${{ steps.resolve.outputs.harness_version }}
+          HA_SPEC: ${{ steps.resolve.outputs.ha_spec }}
+          HARNESS_SPEC: ${{ steps.resolve.outputs.harness_spec }}
         run: |
-          uv pip install --python "$HA_NEXT_ENV/bin/python" '.[test]' \
-            "homeassistant==$HA_VERSION" "pytest-homeassistant-custom-component==$HARNESS_VERSION"
+          # --no-sources: the project's [tool.uv.sources] Core pin must not
+          # override this channel's plugin.
+          uv pip install --python "$HA_NEXT_ENV/bin/python" --no-sources '.[test]' \
+            "$HA_SPEC" "$HARNESS_SPEC"
+          if uv pip show --python "$HA_NEXT_ENV/bin/python" pytest-homeassistant-custom-component >/dev/null 2>&1; then
+            echo 'The retired pytest-homeassistant-custom-component is installed.' >&2
+            exit 1
+          fi
           source "$HA_NEXT_ENV/bin/activate"
           script/test
       - name: Explain skipped tests
         if: always() && steps.tests.outcome == 'skipped'
         env:
-          CHANNEL: ${{ matrix.channel }}
-          HARNESS_VERSION: ${{ steps.resolve.outputs.harness_version }}
+          HARNESS_SPEC: ${{ steps.resolve.outputs.harness_spec }}
+          HARNESS_NOTE: ${{ steps.resolve.outputs.harness_note }}
         run: |
-          if [[ "$CHANNEL" == dev ]]; then
-            echo 'Pytest skipped: the harness does not track Core dev.' >> "$GITHUB_STEP_SUMMARY"
-          elif [[ -z "$HARNESS_VERSION" ]]; then
-            echo 'Pytest skipped: no harness pins the resolved HA version.' >> "$GITHUB_STEP_SUMMARY"
+          if [[ -z "$HARNESS_SPEC" ]]; then
+            echo "Pytest skipped: no test plugin source (${HARNESS_NOTE:-resolver failed})." >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'Pytest skipped: channel installation failed.' >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -104,7 +104,9 @@ jobs:
         env:
           CHANNEL: ${{ matrix.channel }}
           HA_VERSION: ${{ steps.imports.outputs.ha_version || steps.resolve.outputs.ha_version }}
-          HARNESS_VERSION: ${{ steps.resolve.outputs.harness_version }}
+          HARNESS_SOURCE: ${{ steps.resolve.outputs.harness_source }}
+          HARNESS_SPEC: ${{ steps.resolve.outputs.harness_spec }}
+          HARNESS_NOTE: ${{ steps.resolve.outputs.harness_note }}
           STEPS: ${{ toJSON(steps) }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -115,11 +117,11 @@ jobs:
           outcomes = {name: steps.get(name, {}).get('outcome', 'missing')
                       for name in ('resolve', 'install', 'imports', 'hassfest', 'tests')}
           result = {'channel': os.environ['CHANNEL'], 'ha_version': os.environ['HA_VERSION'],
-                    'harness_version': os.environ['HARNESS_VERSION'], 'outcomes': outcomes,
+                    'harness_source': os.environ['HARNESS_SOURCE'],
+                    'harness_spec': os.environ['HARNESS_SPEC'],
+                    'harness_note': os.environ['HARNESS_NOTE'], 'outcomes': outcomes,
                     'run_url': os.environ['RUN_URL']}
-          required = ['install', 'imports', 'hassfest']
-          if result['channel'] == 'pypi':
-              required.append('resolve')
+          required = ['resolve', 'install', 'imports', 'hassfest']
           result['failed'] = any(outcomes[name] != 'success' for name in required) or outcomes['tests'] not in ('success', 'skipped')
           Path('result.json').write_text(json.dumps(result, indent=2) + '\n')
           PY
@@ -169,7 +171,7 @@ jobs:
           set -euo pipefail
           if [[ "$ARTIFACT_OUTCOME" != success ]]; then
             jq -n --arg channel "$CHANNEL" --arg url "$RUN_URL" \
-              '{channel:$channel,failed:true,ha_version:"unknown",harness_version:"",outcomes:{artifact:"missing"},run_url:$url}' > result.json
+              '{channel:$channel,failed:true,ha_version:"unknown",harness_source:"",harness_spec:"",harness_note:"channel results missing",outcomes:{artifact:"missing"},run_url:$url}' > result.json
           fi
           MARKER="<!-- ha-next-channel: $CHANNEL -->"
           ISSUE=$(gh issue list --repo "$GH_REPO" --state open --label ha-next --limit 1000 --json number,body \
@@ -178,7 +180,9 @@ jobs:
           {
             echo "$MARKER"
             echo "Home Assistant: $VERSION"
-            echo "Harness: $(jq -r '.harness_version | if . == "" then "none" else . end' result.json)"
+            echo "Test plugin: $(jq -r 'if (.harness_spec // "") == "" then "none" else "\(.harness_source): `\(.harness_spec)`" end' result.json)"
+            NOTE=$(jq -r '.harness_note // ""' result.json)
+            if [[ -n "$NOTE" ]]; then echo "Plugin note: $NOTE"; fi
             echo
             echo 'Check outcomes:'
             jq -r '.outcomes | to_entries[] | "- \(.key): \(.value)"' result.json
