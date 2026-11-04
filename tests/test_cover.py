@@ -135,3 +135,11 @@ class TestActronZoneDamperCover:
     def test_unique_id(self, coordinator):
         cover = ActronZoneDamperCover(coordinator, "zone_1")
         assert MOCK_SERIAL in cover.unique_id
+
+    def test_missing_zone_unavailable_with_minimal_attributes(
+        self, coordinator, mock_status
+    ):
+        cover = ActronZoneDamperCover(coordinator, "zone_1")
+        del mock_status["zones"]["zone_1"]
+        assert cover.available is False
+        assert cover.extra_state_attributes == {"zone_id": "zone_1"}

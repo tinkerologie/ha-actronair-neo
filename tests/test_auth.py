@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -12,6 +12,12 @@ import pytest
 from custom_components.actronair_neo.api.auth import (
     ActronAirNeoAuth,
     DeviceCodeResponse,
+)
+from custom_components.actronair_neo.api.const import (
+    DEVICE_CODE_POLL_INTERVAL,
+    MAX_REFRESH_RETRIES,
+    REFRESH_RETRY_DELAY,
+    TOKEN_EXPIRY_BUFFER,
 )
 from custom_components.actronair_neo.exceptions import AuthenticationError
 
@@ -490,3 +496,257 @@ class TestGetAuthHeaders:
         auth.token_expires_at = datetime.now() + timedelta(hours=1)
         headers = await auth.get_auth_headers()
         assert headers == {"Authorization": "Bearer mytoken"}
+
+
+class TestUpdateBaseUrl:
+    """Tests for update_base_url."""
+
+    def test_init_strips_trailing_slash(self) -> None:
+        """Test the constructor strips a trailing slash from the base URL."""
+        auth = ActronAirNeoAuth(_make_session(), base_url="https://a.example/")
+        assert auth.base_url == "https://a.example"
+
+    def test_update_base_url_strips_trailing_slash(self) -> None:
+        """Test update_base_url stores the URL without a trailing slash."""
+        auth = ActronAirNeoAuth(_make_session(), base_url="https://a.example")
+        auth.update_base_url("https://b.example/")
+        assert auth.base_url == "https://b.example"
+
+    def test_update_base_url_empty_is_noop(self) -> None:
+        """Test update_base_url ignores an empty string."""
+        auth = ActronAirNeoAuth(_make_session(), base_url="https://a.example")
+        auth.update_base_url("")
+        assert auth.base_url == "https://a.example"
+
+
+class TestActualTokenExpiry:
+    """Tests for _is_token_actually_unexpired."""
+
+    def test_no_token(self) -> None:
+        """Test returns False when there is no access token."""
+        auth = ActronAirNeoAuth(_make_session())
+        auth._actual_token_expires_at = datetime.now(UTC) + timedelta(hours=1)
+        assert auth._is_token_actually_unexpired is False
+
+    def test_no_expiry(self) -> None:
+        """Test returns False when there is no actual expiry."""
+        auth = ActronAirNeoAuth(_make_session())
+        auth.access_token = "at"
+        assert auth._is_token_actually_unexpired is False
+
+    def test_future_expiry(self) -> None:
+        """Test returns True when the actual expiry is in the future."""
+        auth = ActronAirNeoAuth(_make_session())
+        auth.access_token = "at"
+        auth._actual_token_expires_at = datetime.now(UTC) + timedelta(minutes=1)
+        assert auth._is_token_actually_unexpired is True
+
+    def test_past_expiry(self) -> None:
+        """Test returns False when the actual expiry has passed."""
+        auth = ActronAirNeoAuth(_make_session())
+        auth.access_token = "at"
+        auth._actual_token_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        assert auth._is_token_actually_unexpired is False
+
+    def test_naive_datetime(self) -> None:
+        """Test a naive expiry is compared against a naive current time."""
+        auth = ActronAirNeoAuth(_make_session())
+        auth.access_token = "at"
+        auth._actual_token_expires_at = datetime.now() + timedelta(minutes=1)
+        assert auth._is_token_actually_unexpired is True
+        auth._actual_token_expires_at = datetime.now() - timedelta(minutes=1)
+        assert auth._is_token_actually_unexpired is False
+
+    def test_set_tokens_sets_actual_expiry_with_buffer(self) -> None:
+        """Test set_tokens records the unbuffered expiry."""
+        auth = ActronAirNeoAuth(_make_session())
+        auth.set_tokens("at", "rt", datetime.now(UTC).timestamp())
+        assert auth.token_expires_at is not None
+        assert auth._actual_token_expires_at == auth.token_expires_at + timedelta(
+            seconds=TOKEN_EXPIRY_BUFFER
+        )
+        assert auth.is_token_valid is False
+        assert auth._is_token_actually_unexpired is True
+
+
+class TestRefreshCallbackEdges:
+    """Tests for refresh callback edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_callback_receives_token_values(self) -> None:
+        """Test the callback receives access, refresh and expiry timestamp."""
+        session = _make_session()
+        session.request = MagicMock(
+            return_value=_make_response(
+                200,
+                {
+                    "access_token": "new_at",
+                    "refresh_token": "new_rt",
+                    "expires_in": 3600,
+                },
+            )
+        )
+        auth = ActronAirNeoAuth(session)
+        auth.refresh_token_value = "old_rt"
+        cb = AsyncMock()
+        auth.set_token_refresh_callback(cb)
+        await auth.refresh_access_token()
+        cb.assert_awaited_once()
+        access, refresh, expires_at = cb.await_args.args
+        assert access == "new_at"
+        assert refresh == "new_rt"
+        assert auth.token_expires_at is not None
+        assert expires_at == auth.token_expires_at.timestamp()
+
+    @pytest.mark.asyncio
+    async def test_callback_exception_propagates(self) -> None:
+        """Test an exception raised by the callback propagates to the caller."""
+        auth = ActronAirNeoAuth(_make_session())
+        auth.access_token = "at"
+        auth.refresh_token_value = "rt"
+        auth.token_expires_at = datetime.now(UTC) + timedelta(hours=1)
+        auth.set_token_refresh_callback(AsyncMock(side_effect=RuntimeError("boom")))
+        with pytest.raises(RuntimeError, match="boom"):
+            await auth._notify_token_refreshed()
+
+    @pytest.mark.parametrize(
+        ("access", "refresh", "has_expiry"),
+        [
+            (None, "rt", True),
+            ("at", None, True),
+            ("at", "rt", False),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_callback_skipped_when_token_data_missing(
+        self, access: str | None, refresh: str | None, *, has_expiry: bool
+    ) -> None:
+        """Test the callback is not invoked when token data is incomplete."""
+        auth = ActronAirNeoAuth(_make_session())
+        auth.access_token = access
+        auth.refresh_token_value = refresh
+        auth.token_expires_at = (
+            datetime.now(UTC) + timedelta(hours=1) if has_expiry else None
+        )
+        cb = AsyncMock()
+        auth.set_token_refresh_callback(cb)
+        await auth._notify_token_refreshed()
+        cb.assert_not_awaited()
+
+
+class TestDeviceCodeResponseDefaults:
+    """Tests for DeviceCodeResponse defaults."""
+
+    def test_defaults(self) -> None:
+        """Test expires_in and interval defaults."""
+        resp = DeviceCodeResponse(
+            device_code="dc",
+            user_code="uc",
+            verification_uri="https://v",
+            verification_uri_complete="https://v?c=uc",
+        )
+        assert resp.expires_in == 300
+        assert resp.interval == DEVICE_CODE_POLL_INTERVAL
+
+    @pytest.mark.asyncio
+    async def test_request_device_code_fills_defaults(self) -> None:
+        """Test missing optional fields fall back to defaults."""
+        session = _make_session()
+        session.request = MagicMock(
+            return_value=_make_response(200, {"device_code": "dc", "user_code": "uc"})
+        )
+        auth = ActronAirNeoAuth(session, base_url="https://a.example")
+        result = await auth.request_device_code()
+        assert result.verification_uri == "https://a.example/connect"
+        assert result.verification_uri_complete == "https://a.example/connect"
+        assert result.expires_in == 300
+        assert result.interval == DEVICE_CODE_POLL_INTERVAL
+
+
+class TestRefreshRetryDelays:
+    """Tests for the refresh retry backoff."""
+
+    @pytest.mark.asyncio
+    async def test_sleep_delays_exponential(self) -> None:
+        """Test retry sleeps use exponential backoff and stop before the last try."""
+        session = _make_session()
+        session.request = MagicMock(return_value=_make_response(400, "fail"))
+        auth = ActronAirNeoAuth(session)
+        auth.refresh_token_value = "rt"
+        with (
+            patch(
+                "custom_components.actronair_neo.api.auth.asyncio.sleep",
+                new_callable=AsyncMock,
+            ) as mock_sleep,
+            pytest.raises(AuthenticationError),
+        ):
+            await auth.refresh_access_token()
+        assert [c.args[0] for c in mock_sleep.await_args_list] == [
+            REFRESH_RETRY_DELAY * (2**i) for i in range(MAX_REFRESH_RETRIES - 1)
+        ]
+        assert session.request.call_count == MAX_REFRESH_RETRIES
+
+
+class TestEnsureValidTokenFailure:
+    """Tests for ensure_valid_token when refresh fails."""
+
+    @pytest.mark.asyncio
+    async def test_refresh_fails_but_token_unexpired(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test proactive refresh failure keeps using an unexpired token."""
+        session = _make_session()
+        session.request = MagicMock(return_value=_make_response(400, "fail"))
+        auth = ActronAirNeoAuth(session)
+        auth.set_tokens(
+            "at", "rt", (datetime.now(UTC) - timedelta(seconds=1)).timestamp()
+        )
+        with patch(
+            "custom_components.actronair_neo.api.auth.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            await auth.ensure_valid_token()
+        assert auth.access_token == "at"
+        assert "Proactive token refresh failed" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_refresh_fails_and_token_expired(self) -> None:
+        """Test refresh failure re-raises when the token is truly expired."""
+        session = _make_session()
+        session.request = MagicMock(return_value=_make_response(400, "fail"))
+        auth = ActronAirNeoAuth(session)
+        auth.set_tokens(
+            "at", "rt", (datetime.now(UTC) - timedelta(hours=1)).timestamp()
+        )
+        with (
+            patch(
+                "custom_components.actronair_neo.api.auth.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+            pytest.raises(AuthenticationError),
+        ):
+            await auth.ensure_valid_token()
+
+
+class TestStoreTokenResponseEmpty:
+    """Tests for _store_token_response with an empty access token."""
+
+    def test_empty_access_token_raises(self) -> None:
+        """Test an empty access_token string is rejected."""
+        auth = ActronAirNeoAuth(_make_session())
+        with pytest.raises(AuthenticationError, match="No access token"):
+            auth._store_token_response({"access_token": ""})
+        assert auth.access_token is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_zero_retries_returns_without_request() -> None:
+    """Test refresh_access_token is a no-op when retries are configured to zero."""
+    session = _make_session()
+    session.request = MagicMock()
+    auth = ActronAirNeoAuth(session)
+    auth.refresh_token_value = "rt"
+    with patch("custom_components.actronair_neo.api.auth.MAX_REFRESH_RETRIES", 0):
+        await auth.refresh_access_token()
+    session.request.assert_not_called()
+    assert auth.access_token is None

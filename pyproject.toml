@@ -100,15 +100,6 @@ source = ["custom_components/actronair_neo"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
-    "*/climate.py",  # Entity platform - requires full HA integration testing
-    "*/sensor.py",  # Entity platform - requires full HA integration testing
-    "*/binary_sensor.py",  # Entity platform - requires full HA integration testing
-    "*/switch.py",  # Entity platform - requires full HA integration testing
-    "*/number.py",  # Entity platform - requires full HA integration testing
-    "*/api.py",  # Deprecated - replaced by api_wrapper.py
-    "*/diagnostics.py",  # Optional diagnostics feature
-    "*/repairs.py",  # Optional repairs/health monitoring feature
-    "*/__init__.py",  # Integration setup - requires full HA integration testing
 ]
 
 [tool.coverage.report]
@@ -120,7 +111,7 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "@abstractmethod",
 ]
-fail_under = 64  # Achieved coverage for core business logic (entity platforms excluded)
+fail_under = 95  # Quality scale test-coverage rule; every module is measured
 show_missing = true
 precision = 2
 

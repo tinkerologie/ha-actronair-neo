@@ -1974,3 +1974,514 @@ class TestQuietModeSupport:
 
         assert main["quiet_mode_supported"] is supported
         assert main["quiet_mode"] is quiet_mode
+
+
+def _push_details(user_id: str = "user-1") -> Any:
+    """Return realtime connection details for push lifecycle tests."""
+    from custom_components.actronair_neo.api.push.models import (
+        RealtimeConnectionDetails,
+    )
+
+    return RealtimeConnectionDetails(
+        endpoint="broker", port=8883, protocol="ssl", user_id=user_id
+    )
+
+
+class _FakeTransport:
+    """Minimal push transport double that blocks until stopped."""
+
+    def __init__(self) -> None:
+        self._stop = asyncio.Event()
+        self.started = False
+        self.stopped = False
+
+    async def start(self) -> None:
+        self.started = True
+        await self._stop.wait()
+
+    async def stop(self) -> None:
+        self.stopped = True
+        self._stop.set()
+
+
+class TestCoordinatorPushLifecycle:
+    """Exercise async_start_push / async_stop_push through the public API."""
+
+    _FACTORY = "custom_components.actronair_neo.coordinator.create_push_transport"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("user_id", ["", "unknown"])
+    async def test_start_push_warns_without_user_id(
+        self,
+        coordinator_instance: ActronDataCoordinator,
+        caplog: pytest.LogCaptureFixture,
+        user_id: str,
+    ) -> None:
+        c = coordinator_instance
+        c.enable_push = True
+        c.api.get_realtime_connection_details = AsyncMock(
+            return_value=_push_details(user_id)
+        )
+        with patch(self._FACTORY) as factory:
+            await c.async_start_push()
+        factory.assert_not_called()
+        assert c.push_transport is None
+        assert "no user id" in caplog.text
+        await c.async_stop_push()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("email_kind", "email_value", "expected"),
+        [
+            ("awaitable", "me@example.com", "me@example.com"),
+            ("awaitable", None, ""),
+            ("plain", "plain@example.com", "plain@example.com"),
+            ("plain", 42, ""),
+        ],
+        ids=["awaitable", "awaitable-non-str", "string", "other"],
+    )
+    async def test_start_push_resolves_email_and_starts_task(
+        self,
+        coordinator_instance: ActronDataCoordinator,
+        email_kind: str,
+        email_value: Any,
+        expected: str,
+    ) -> None:
+        c = coordinator_instance
+        c.enable_push = True
+        c.api.get_realtime_connection_details = AsyncMock(return_value=_push_details())
+        if email_kind == "awaitable":
+            c.api.get_account_email = AsyncMock(return_value=email_value)
+        else:
+            c.api.get_account_email = MagicMock(return_value=email_value)
+        transport = _FakeTransport()
+        with patch(self._FACTORY, return_value=transport) as factory:
+            await c.async_start_push()
+            await asyncio.sleep(0)
+            assert c.push_transport is transport
+            assert c._push_task is not None
+            assert transport.started
+
+            # A second start is a no-op while a transport is active.
+            await c.async_start_push()
+            factory.assert_called_once()
+
+        kwargs = factory.call_args.kwargs
+        assert kwargs["username"] == expected
+        assert kwargs["client_id"] == "ha-test123456-user-1"
+        assert kwargs["serial"] == "TEST123456"
+        assert kwargs["platform"] == "neo"
+
+        await c.async_stop_push()
+        assert transport.stopped
+        assert c.push_transport is None
+        assert c._push_task is None
+
+    @pytest.mark.asyncio
+    async def test_start_push_suppresses_email_error(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        c.enable_push = True
+        c.api.get_realtime_connection_details = AsyncMock(return_value=_push_details())
+        c.api.get_account_email = MagicMock(side_effect=RuntimeError("boom"))
+        transport = _FakeTransport()
+        with patch(self._FACTORY, return_value=transport) as factory:
+            await c.async_start_push()
+        assert factory.call_args.kwargs["username"] == ""
+        await c.async_stop_push()
+        assert c._push_task is None
+
+    @pytest.mark.asyncio
+    async def test_stop_push_without_transport_or_task(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        assert c.push_transport is None
+        await c.async_stop_push()
+        assert c._push_task is None
+
+    @pytest.mark.asyncio
+    async def test_stop_push_with_finished_task(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+
+        async def _done() -> None:
+            return None
+
+        c._push_task = asyncio.create_task(_done())
+        await c._push_task
+        await c.async_stop_push()
+        assert c._push_task is None
+
+
+class TestCoordinatorBranchCoverage:
+    """Targeted tests for remaining coordinator branches."""
+
+    def test_now_matching_naive_and_aware(self) -> None:
+        import datetime as dt
+
+        from custom_components.actronair_neo.coordinator import _now_matching
+
+        assert _now_matching(dt.datetime.now(dt.UTC)).tzinfo is not None
+        assert _now_matching(dt.datetime.now()).tzinfo is None
+        assert _now_matching(None).tzinfo is None
+
+    @pytest.mark.parametrize(
+        ("settings", "expected"),
+        [
+            ({"Mode": "DRY"}, True),
+            ({"DryMode": {"Supported": True}}, True),
+            ({"DryMode": {"Supported": False}}, False),
+            ({"DryMode": "yes"}, False),
+            ({"Modes": ["COOL", "DRY"]}, True),
+            ({"SupportedModes": ("DRY",)}, True),
+            ({"EnabledModes": ["DRY"]}, True),
+            ({"Modes": "DRY"}, False),
+            ({}, False),
+        ],
+    )
+    def test_detect_dry_mode_support(
+        self, settings: dict[str, Any], *, expected: bool
+    ) -> None:
+        assert ActronDataCoordinator._detect_dry_mode_support(settings) is expected
+
+    @pytest.mark.asyncio
+    async def test_turn_off_sends_command_and_refreshes(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        c.async_request_refresh = AsyncMock()
+        await c.turn_off()
+        c.api.create_command.assert_called_with("OFF")
+        c.api.send_command.assert_awaited_once()
+        c.async_request_refresh.assert_awaited_once()
+        assert c._force_fresh_on_next_update is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("with_prior", [True, False])
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {
+                "type": "full-status-broadcast",
+                "wcFirmware": "1.0",
+                "UserAirconSettings": {"Mode": "HEAT"},
+            },
+            {
+                "type": "status-change-broadcast",
+                "correlationId": "abc",
+                "UserAirconSettings.Mode": "HEAT",
+            },
+            {
+                "event": {
+                    "type": "full-status-broadcast",
+                    "UserAirconSettings": {"Mode": "HEAT"},
+                }
+            },
+            {"lastKnownState": {"UserAirconSettings": {"Mode": "HEAT"}}},
+            {"UserAirconSettings": {"Mode": "HEAT"}},
+        ],
+        ids=["que-full", "que-change", "neo-full-event", "lks", "bare"],
+    )
+    async def test_handle_push_payload_shapes(
+        self,
+        coordinator_instance: ActronDataCoordinator,
+        payload: dict[str, Any],
+        *,
+        with_prior: bool,
+    ) -> None:
+        c = coordinator_instance
+        prior = {"UserAirconSettings": {"Mode": "COOL", "isOn": True}}
+        c._last_raw_response = {"lastKnownState": prior} if with_prior else {}
+        captured: dict[str, Any] = {}
+
+        async def _capture(data: dict[str, Any]) -> dict[str, Any]:
+            captured["state"] = data["lastKnownState"]
+            return {"zones": {"zone_1": {}}, "main": {}}
+
+        c._parse_data_optimized = _capture
+        c.async_set_updated_data = MagicMock()
+        await c._handle_push_update(payload, "kind")
+
+        state = captured["state"]
+        assert state["UserAirconSettings"]["Mode"] == "HEAT"
+        assert "type" not in state
+        assert "wcFirmware" not in state
+        assert "correlationId" not in state
+        if with_prior:
+            assert state["UserAirconSettings"]["isOn"] is True
+        c.async_set_updated_data.assert_called_once()
+
+    def test_supports_power_monitoring_heuristics(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+
+        def _set(ou: dict[str, Any]) -> None:
+            c.data = {"outdoor_unit": ou}  # type: ignore[typeddict-item]
+
+        c.data = None  # type: ignore[assignment]
+        assert c.supports_power_monitoring() is False
+
+        _set({"family": "Fixed Speed", "ctrl_board_type": "Type 100"})
+        assert c.supports_power_monitoring() is False
+
+        _set({"family": "Fixed Speed", "comp_power": 1200})
+        assert c.supports_power_monitoring() is True
+
+        _set({"supply_voltage": 240})
+        assert c.supports_power_monitoring() is True
+
+        _set({"supply_current": 5})
+        assert c.supports_power_monitoring() is True
+
+        _set({"family": "Tru-Inverter", "compressor_on": True})
+        assert c.supports_power_monitoring() is True
+
+        _set({"family": "Tru-Inverter", "compressor_on": False})
+        assert c.supports_power_monitoring() is False
+
+        _set({"family": "Fixed Speed"})
+        assert c.supports_power_monitoring() is False
+
+        _set({})
+        assert c.supports_power_monitoring() is False
+
+    def test_decode_fan_mode_bitmap_branches(self) -> None:
+        default = ["LOW", "MED", "HIGH"]
+        decode = ActronDataCoordinator._decode_fan_mode_bitmap
+        assert decode(8, default, auto_fan_enabled=True) == ["AUTO"]
+        assert decode(8, default) == default
+        assert decode(3, default) == default
+        assert decode(5, default, current_fan_mode="HIGH+CONT") == default
+        assert decode(12, default, auto_fan_enabled=True) == ["HIGH", "AUTO"]
+
+    @pytest.mark.asyncio
+    async def test_parse_data_edge_shapes(
+        self,
+        coordinator_instance: ActronDataCoordinator,
+        mock_api_response: dict[str, Any],
+    ) -> None:
+        import copy
+
+        c = coordinator_instance
+        data = copy.deepcopy(mock_api_response)
+        lks = data["lastKnownState"]
+        lks["UserAirconSettings"]["ModeSupport"] = {"Dry": True, "Auto": False}
+        lks["UserAirconSettings"]["ZoneTemperatureSetpointVariance_oC"] = "n/a"
+        lks["NV_Limits"] = ["not", "a", "dict"]
+        lks["<TEST123456>"] = {"SomeValue": 1}
+        lks["RemoteZoneInfo"].append("not-a-dict")
+        lks["RemoteZoneInfo"][1]["Sensors"] = {"OTHERDEVICE": {"NV_Kind": "x"}}
+        lks["RemoteZoneInfo"][0]["Sensors"] = {
+            "other": {"NV_Kind": "ZS: 1"},
+            "test123456": {"NV_Kind": "ZS: NOMATCH"},
+        }
+
+        result = await c._parse_data(data)
+        main = result["main"]
+        assert "DRY" in main["supported_hvac_modes"]
+        assert "AUTO" not in main["supported_hvac_modes"]
+        assert main["zone_temp_variance"] == 0.0
+        assert set(result["zones"]) == {"zone_1", "zone_2"}
+        assert result["zones"]["zone_1"]["battery_level"] is None
+
+    @pytest.mark.asyncio
+    async def test_parse_data_dry_fallback_and_non_list_zones(
+        self,
+        coordinator_instance: ActronDataCoordinator,
+        mock_api_response: dict[str, Any],
+    ) -> None:
+        import copy
+
+        c = coordinator_instance
+        data = copy.deepcopy(mock_api_response)
+        lks = data["lastKnownState"]
+        lks["UserAirconSettings"]["Mode"] = "DRY"
+        lks["UserAirconSettings"]["ZoneTemperatureSetpointVariance_oC"] = None
+        lks["NV_Limits"] = {"UserSetpoint_oC": "bad"}
+        lks["RemoteZoneInfo"] = {"not": "a list"}
+
+        result = await c._parse_data(data)
+        assert "DRY" in result["main"]["supported_hvac_modes"]
+        assert result["zones"] == {}
+
+    @pytest.mark.asyncio
+    async def test_parse_zones_skips_non_existent_zone(
+        self,
+        coordinator_instance: ActronDataCoordinator,
+        mock_api_response: dict[str, Any],
+    ) -> None:
+        c = coordinator_instance
+        c.api.get_zone_capabilities = MagicMock(
+            return_value=ZoneCapabilities(
+                exists=False,
+                can_operate=False,
+                has_temp_control=False,
+                has_separate_targets=False,
+                target_temp_cool=None,
+                target_temp_heat=None,
+                peripheral_capabilities=None,
+            )
+        )
+        result = await c._parse_data(mock_api_response)
+        assert result["zones"] == {}
+
+    def test_parse_cache_expired_without_timestamp(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        c._parsed_data_cache_timestamp = None
+        assert c._is_parse_cache_expired() is True
+
+    def test_diagnostics_snapshot_and_push_transport(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        assert c.get_diagnostics_snapshot() is c._last_raw_response
+        assert c.push_transport is None
+
+    def test_apply_pending_zone_overrides_branches(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        now = datetime.now()
+
+        # Malformed main data: EnabledZones not a list -> untouched.
+        c._pending_zone_state_overrides = {0: (True, now)}
+        bad: Any = {"main": {"EnabledZones": None}, "zones": {}}
+        c._apply_pending_zone_state_overrides(bad)
+        assert c._pending_zone_state_overrides == {0: (True, now)}
+
+        # Out-of-range index is skipped; confirmed index is dropped; pending
+        # index without a parsed zone is still forced into EnabledZones.
+        c._pending_zone_state_overrides = {
+            0: (True, now),
+            1: (True, now),
+            5: (True, now),
+        }
+        data: Any = {"main": {"EnabledZones": [True, False]}, "zones": {}}
+        c._apply_pending_zone_state_overrides(data)
+        assert data["main"]["EnabledZones"] == [True, True]
+        assert 0 not in c._pending_zone_state_overrides
+        assert 1 in c._pending_zone_state_overrides
+        assert 5 in c._pending_zone_state_overrides
+
+    def test_optimistic_zone_update_ignores_malformed_last_data(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        c.async_set_updated_data = MagicMock()
+        c.last_data = {"main": None, "zones": {}}  # type: ignore[typeddict-item]
+        c._optimistically_update_zone_state([True])
+        c.async_set_updated_data.assert_not_called()
+
+    def test_get_zone_peripheral_no_matches(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        c._last_raw_response = {
+            "lastKnownState": {
+                "RemoteZoneInfo": [
+                    {
+                        "Sensors": {
+                            "other": {"NV_Kind": "ZS: X"},
+                            "test123456": {"NV_Kind": "ZS: 23E01206"},
+                        }
+                    }
+                ],
+                "AirconSystem": {"Peripherals": [{"SerialNumber": "NOPE"}]},
+            }
+        }
+        assert c.get_zone_peripheral("zone_1") is None
+
+        # No sensor keyed by this device: not a wireless sensor.
+        c._last_raw_response["lastKnownState"]["RemoteZoneInfo"][0]["Sensors"] = {
+            "other": {"NV_Kind": "ZS: X"}
+        }
+        assert c.get_zone_peripheral("zone_1") is None
+
+    def test_api_passthrough_properties(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        stamp = datetime(2025, 1, 1)  # noqa: DTZ001
+        c.api.last_successful_request = stamp
+        c.api.response_cache = {"a": 1, "b": 2}
+        assert c.last_successful_api_request == stamp
+        assert c.api_cache_size == 2
+
+    @pytest.mark.asyncio
+    async def test_set_fan_mode_explicit_continuous_without_throttle(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        c._last_fan_mode_change = None
+        c._send_fan_mode_with_retry = AsyncMock()
+        await c.set_fan_mode("LOW", continuous=False)
+        c._send_fan_mode_with_retry.assert_awaited_once()
+
+        # Elapsed beyond the throttle interval: no sleep.
+        c._last_fan_mode_change = datetime.now() - timedelta(hours=1)
+        with patch("asyncio.sleep", new=AsyncMock()) as sleep:
+            await c._throttle_fan_mode_change()
+        sleep.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_set_zone_state_ignores_out_of_range_pending_override(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        c.last_data = {
+            "main": {"EnabledZones": [False, False]},
+            "zones": {},
+        }  # type: ignore[typeddict-item]
+        c._pending_zone_state_overrides = {7: (True, datetime.now())}
+        c.async_set_updated_data = MagicMock()
+        c.async_request_refresh = AsyncMock()
+        await c.set_zone_state("zone_1", enable=True)
+        c.api.send_command.assert_awaited()
+        c._pending_zone_state_overrides.clear()
+
+    @pytest.mark.asyncio
+    async def test_apply_zone_preset_partial_configs(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        c = coordinator_instance
+        caps = ZoneCapabilities(
+            exists=True,
+            can_operate=True,
+            has_temp_control=True,
+            has_separate_targets=False,
+            target_temp_cool=24.0,
+            target_temp_heat=22.0,
+            peripheral_capabilities=None,
+        )
+        c.last_data = {"zones": {"zone_1": {"capabilities": caps}}}  # type: ignore[typeddict-item]
+        c.set_zone_state = AsyncMock()
+        c.set_zone_temperature = AsyncMock()
+        c.async_request_refresh = AsyncMock()
+        preset = MagicMock()
+        preset.zones = {"zone_1": {"temp_heat": 21.0}, "zone_9": {}}
+        c.zone_preset_manager.get_preset = MagicMock(return_value=preset)
+        await c.async_apply_zone_preset("P")
+        c.set_zone_state.assert_not_awaited()
+        c.set_zone_temperature.assert_awaited_once_with("zone_1", target_heat=21.0)
+
+        c.set_zone_temperature.reset_mock()
+        await c._apply_zone_preset_temps("zone_1", {"temp_cool": 23.0})
+        c.set_zone_temperature.assert_awaited_once_with("zone_1", target_cool=23.0)
+
+    @pytest.mark.asyncio
+    async def test_execute_bulk_zone_op_unknown_operation(
+        self, coordinator_instance: ActronDataCoordinator
+    ) -> None:
+        result = await coordinator_instance._execute_bulk_zone_op("noop", "zone_1")
+        assert result == {"zone_id": "zone_1", "status": "success"}
+
+    def test_parse_outdoor_temp_ambient_missing(self) -> None:
+        parse = ActronDataCoordinator._parse_outdoor_temp
+        assert parse(3000.0, {"AmbientSensErr": False}) is None
+        assert parse(3000.0, {"AmbientSensErr": False, "AmbTemp": 18.0}) == 18.0

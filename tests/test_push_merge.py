@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from custom_components.actronair_neo.api.push.merge import (
     apply_event_paths,
     deep_merge,
+    loads_repairing_escapes,
 )
 
 
@@ -74,3 +79,99 @@ def test_inputs_not_mutated():
     deep_merge(base, delta)
     assert base == {"a": {"x": 1}}
     assert delta == {"a": {"y": 2}}
+
+
+# ---------------------------------------------------------------------------
+# loads_repairing_escapes
+# ---------------------------------------------------------------------------
+
+
+def test_loads_repairing_escapes_valid_json():
+    assert loads_repairing_escapes('{"a": [1, "b"]}') == {"a": [1, "b"]}
+
+
+def test_loads_repairing_escapes_repairs_apostrophe_and_keeps_valid_escapes():
+    text = r'{"name": "Kurt\'s \"Office\"", "path": "a\\b", "u": "\u00e9"}'
+    assert loads_repairing_escapes(text) == {
+        "name": 'Kurt\'s "Office"',
+        "path": "a\\b",
+        "u": "\u00e9",
+    }
+
+
+def test_loads_repairing_escapes_reraises_without_apostrophe_escape():
+    with pytest.raises(json.JSONDecodeError):
+        loads_repairing_escapes('{"a": 1')
+
+
+def test_loads_repairing_escapes_reraises_when_repair_still_invalid():
+    with pytest.raises(json.JSONDecodeError):
+        loads_repairing_escapes(r'{"a": "x\'s"')
+
+
+# ---------------------------------------------------------------------------
+# apply_event_paths edge cases
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", ["", "[0].a", "a..b[", "a[x]", "]"])
+def test_apply_event_paths_ignores_unparsable_paths(path):
+    state = {"a": {"b": 1}}
+    assert apply_event_paths(state, {path: 99}) == state
+
+
+def test_apply_event_paths_leading_dots_are_skipped():
+    assert apply_event_paths({}, {".a.b": 1}) == {"a": {"b": 1}}
+
+
+def test_apply_event_paths_pads_bool_list_with_false():
+    out = apply_event_paths({}, {"UserAirconSettings.EnabledZones[3]": True})
+    assert out["UserAirconSettings"]["EnabledZones"] == [False, False, False, True]
+
+
+def test_apply_event_paths_pads_non_bool_list_with_none():
+    out = apply_event_paths({"a": [1]}, {"a[3]": 5})
+    assert out["a"] == [1, None, None, 5]
+
+
+def test_apply_event_paths_pads_nested_list_with_lists():
+    out = apply_event_paths({}, {"a[1][2]": "x"})
+    assert out["a"] == [[], [None, None, "x"]]
+
+
+def test_apply_event_paths_pads_with_independent_dicts():
+    out = apply_event_paths({}, {"a[1].b": 1})
+    assert out["a"] == [{}, {"b": 1}]
+    assert out["a"][0] is not out["a"][1]
+
+
+def test_apply_event_paths_replaces_wrong_type_list_element():
+    out = apply_event_paths({"a": [5, [1]]}, {"a[0].b": 1, "a[1][0]": 2})
+    assert out["a"] == [{"b": 1}, [2]]
+
+
+def test_apply_event_paths_replaces_wrong_type_list_element_with_list():
+    out = apply_event_paths({"a": [{"k": 1}]}, {"a[0][1]": True})
+    assert out["a"] == [[False, True]]
+
+
+def test_apply_event_paths_replaces_wrong_type_intermediate_dict_value():
+    state = {"a": 5, "b": {"x": 1}, "c": [1]}
+    out = apply_event_paths(state, {"a.b": 1, "b[0]": 2, "c.d": 3})
+    assert out == {"a": {"b": 1}, "b": [2], "c": {"d": 3}}
+    assert state == {"a": 5, "b": {"x": 1}, "c": [1]}
+
+
+def test_apply_event_paths_overwrites_existing_list_element():
+    out = apply_event_paths({"a": [1, 2, 3]}, {"a[1]": 20})
+    assert out["a"] == [1, 20, 3]
+
+
+def test_apply_event_paths_angle_bracket_key_keeps_dots():
+    out = apply_event_paths(
+        {}, {"Peripherals.<10.0.0.1>.Battery": 80, "<x.y>[1]": True}
+    )
+    assert out == {
+        "Peripherals": {"<10.0.0.1>": {"Battery": 80}},
+        "<x.y>": [False, True],
+    }

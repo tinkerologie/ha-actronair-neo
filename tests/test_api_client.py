@@ -1122,3 +1122,320 @@ def test_platform_property_que_for_que_base_url():
     client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
     client._base_url = API_URL_QUE
     assert client.platform == "que"
+
+
+# --- Coverage: cache length, retry on status, HAL links, account email ---
+
+
+@pytest.mark.asyncio
+async def test_response_cache_len() -> None:
+    cache = ResponseCache()
+    assert len(cache) == 0
+    await cache.set("a", 1)
+    await cache.set("b", 2)
+    assert len(cache) == 2
+
+
+class TestMakeRequestRetryableStatus:
+    @pytest.mark.asyncio
+    async def test_retryable_status_sleeps_then_succeeds(self) -> None:
+        session = _mock_session()
+        session.request = MagicMock(
+            side_effect=[
+                _make_response_ctx(500, "boom"),
+                _make_response_ctx(502, "boom"),
+                _make_response_ctx(200, {"ok": True}),
+            ]
+        )
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        with patch(
+            "custom_components.actronair_neo.api.client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
+            result = await client._make_request("GET", "http://test")
+        assert result == {"ok": True}
+        assert [c.args[0] for c in mock_sleep.await_args_list] == [5, 10]
+        assert client.error_count == 0
+
+    @pytest.mark.asyncio
+    async def test_retryable_status_exhausted_raises(self) -> None:
+        session = _mock_session()
+        session.request = MagicMock(
+            side_effect=lambda *a, **k: _make_response_ctx(500, "boom")
+        )
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        with (
+            patch(
+                "custom_components.actronair_neo.api.client.asyncio.sleep",
+                new_callable=AsyncMock,
+            ) as mock_sleep,
+            pytest.raises(ApiError, match="Server error") as exc_info,
+        ):
+            await client._make_request("GET", "http://test")
+        assert exc_info.value.status_code == 500
+        assert session.request.call_count == 3
+        assert mock_sleep.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_non_retryable_status_raises_immediately(self) -> None:
+        session = _mock_session()
+        session.request = MagicMock(return_value=_make_response_ctx(404, "nope"))
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        with (
+            patch(
+                "custom_components.actronair_neo.api.client.asyncio.sleep",
+                new_callable=AsyncMock,
+            ) as mock_sleep,
+            pytest.raises(ApiError, match="Client error"),
+        ):
+            await client._make_request("GET", "http://test")
+        assert session.request.call_count == 1
+        mock_sleep.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_api_error_without_status_raises_immediately(self) -> None:
+        auth = _mock_auth()
+        auth.get_auth_headers = AsyncMock(side_effect=ApiError("no status"))
+        session = _mock_session()
+        session.request = MagicMock()
+        client = ActronAirNeoApiClient(auth, session)
+        with pytest.raises(ApiError, match="no status"):
+            await client._make_request("GET", "http://test")
+        session.request.assert_not_called()
+
+
+class TestHalLinks:
+    def test_extract_hal_links_valid(self) -> None:
+        links = ActronAirNeoApiClient._extract_hal_links(
+            {
+                "_links": {
+                    "self": {"href": "/api/v0/self"},
+                    "rtc-details": {"href": "https://x.example/rtc"},
+                    "empty": {"href": ""},
+                    "non-str": {"href": 123},
+                    "missing": {},
+                    "not-dict": "oops",
+                }
+            }
+        )
+        assert links == {
+            "self": "/api/v0/self",
+            "rtc-details": "https://x.example/rtc",
+        }
+
+    @pytest.mark.parametrize("raw", [None, [], "x"])
+    def test_extract_hal_links_not_dict(self, raw) -> None:
+        system = {} if raw is None else {"_links": raw}
+        assert ActronAirNeoApiClient._extract_hal_links(system) == {}
+
+    def test_resolve_endpoint_url_absolute(self) -> None:
+        client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        client._device_links["SERIAL1"] = {"rel": "https://abs.example/path"}
+        assert (
+            client._resolve_endpoint_url("SERIAL1", "rel", "/default")
+            == "https://abs.example/path"
+        )
+
+    def test_resolve_endpoint_url_relative(self) -> None:
+        client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        client._device_links["SERIAL1"] = {"rel": "/api/v0/rel?x=1"}
+        assert (
+            client._resolve_endpoint_url("SERIAL1", "rel", "/default")
+            == f"{API_URL}/api/v0/rel?x=1"
+        )
+
+    def test_resolve_endpoint_url_fallback(self) -> None:
+        client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        client._device_links["SERIAL1"] = {"other": "/x"}
+        assert (
+            client._resolve_endpoint_url("SERIAL1", "rel", "/default?q=1")
+            == f"{API_URL}/default?q=1"
+        )
+        assert (
+            client._resolve_endpoint_url("UNKNOWN", "rel", "/default")
+            == f"{API_URL}/default"
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_devices_stores_links(self) -> None:
+        session = _mock_session()
+        session.request = MagicMock(
+            return_value=_make_response_ctx(
+                200,
+                {
+                    "_embedded": {
+                        "ac-system": [
+                            {
+                                "serial": "SER1",
+                                "description": "Lounge",
+                                "type": "default",
+                                "id": "id1",
+                                "_links": {"rtc-details": {"href": "/api/v0/rtc/SER1"}},
+                            },
+                            {
+                                "serial": "SER2",
+                                "description": "Bed",
+                                "type": "default",
+                                "id": "id2",
+                            },
+                        ]
+                    }
+                },
+            )
+        )
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        devices = await client.get_devices()
+        assert devices[0].links == {"rtc-details": "/api/v0/rtc/SER1"}
+        assert devices[1].links == {}
+        assert client._device_links == {"SER1": {"rtc-details": "/api/v0/rtc/SER1"}}
+        assert (
+            client._resolve_endpoint_url("SER1", "rtc-details", "/default")
+            == f"{API_URL}/api/v0/rtc/SER1"
+        )
+
+
+class TestGetAccountEmail:
+    @pytest.mark.asyncio
+    async def test_cached_value_returned_without_request(self) -> None:
+        session = _mock_session()
+        session.request = MagicMock()
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        client._account_email = "cached@example.com"
+        assert await client.get_account_email() == "cached@example.com"
+        session.request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_success_caches_email(self) -> None:
+        session = _mock_session()
+        session.request = MagicMock(
+            return_value=_make_response_ctx(
+                200, {"id": "u1", "email": "user@example.com"}
+            )
+        )
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        assert await client.get_account_email() == "user@example.com"
+        assert await client.get_account_email() == "user@example.com"
+        assert session.request.call_count == 1
+        assert session.request.call_args.args[1].endswith("/api/v0/client/account")
+
+    @pytest.mark.asyncio
+    async def test_api_error_falls_back_to_empty(self) -> None:
+        session = _mock_session()
+        session.request = MagicMock(return_value=_make_response_ctx(404, "nope"))
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        assert await client.get_account_email() == ""
+        assert client._account_email == ""
+
+    @pytest.mark.asyncio
+    async def test_validation_error_falls_back_to_empty(self) -> None:
+        session = _mock_session()
+        session.request = MagicMock(
+            return_value=_make_response_ctx(200, {"email": ["not", "a", "string"]})
+        )
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        assert await client.get_account_email() == ""
+        assert client._account_email == ""
+
+    @pytest.mark.asyncio
+    async def test_non_dict_response_falls_back_to_empty(self) -> None:
+        session = _mock_session()
+        session.request = MagicMock(return_value=_make_response_ctx(200, "plain"))
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        assert await client.get_account_email() == ""
+        assert client._account_email == ""
+
+
+def test_create_command_unknown_type_raises() -> None:
+    client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+    with pytest.raises(ApiError, match="Unknown command type: BOGUS"):
+        client.create_command("BOGUS")
+
+
+@pytest.mark.asyncio
+async def test_set_system_auth_without_update_base_url() -> None:
+    auth = _mock_auth()
+    auth.update_base_url = None
+    client = ActronAirNeoApiClient(auth, _mock_session())
+    await client.set_system("SER1", base_url=API_URL_QUE)
+    assert client._base_url == API_URL_QUE
+
+
+@pytest.mark.asyncio
+async def test_set_system_syncs_auth_base_url() -> None:
+    auth = _mock_auth()
+    client = ActronAirNeoApiClient(auth, _mock_session())
+    await client.set_system("SER1", base_url=API_URL_QUE)
+    auth.update_base_url.assert_called_once_with(API_URL_QUE)
+
+
+class TestGetAcStatusFutureEdges:
+    @pytest.mark.asyncio
+    async def test_future_already_resolved_by_other_party(self) -> None:
+        """A future completed during the request is left untouched."""
+        session = _mock_session()
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        key = "get_ac_status_SER1"
+
+        def _request(*args, **kwargs):
+            client._pending_requests[key].set_result({"other": True})
+            return _make_response_ctx(200, {"fresh": True})
+
+        session.request = MagicMock(side_effect=_request)
+        result = await client.get_ac_status("SER1", use_cache=False)
+        assert result == {"fresh": True}
+        assert key not in client._pending_requests
+
+    @pytest.mark.asyncio
+    async def test_future_already_failed_by_other_party(self) -> None:
+        """A future failed during the request does not get a second exception."""
+        session = _mock_session()
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        key = "get_ac_status_SER1"
+
+        def _request(*args, **kwargs):
+            client._pending_requests[key].set_exception(ApiError("other"))
+            return _make_response_ctx(404, "nope")
+
+        session.request = MagicMock(side_effect=_request)
+        with pytest.raises(ApiError, match="Client error"):
+            await client.get_ac_status("SER1")
+        assert key not in client._pending_requests
+
+    @pytest.mark.asyncio
+    async def test_cancellation_leaves_future_pending_and_cleans_up(self) -> None:
+        """Cancellation bypasses the except block; finally still cleans up."""
+        session = _mock_session()
+        session.request = MagicMock(side_effect=asyncio.CancelledError)
+        client = ActronAirNeoApiClient(_mock_auth(), session)
+        with pytest.raises(asyncio.CancelledError):
+            await client.get_ac_status("SER1")
+        assert "get_ac_status_SER1" not in client._pending_requests
+
+
+class TestSetFanModeBranches:
+    @pytest.mark.asyncio
+    async def test_explicit_continuous_and_no_throttle_needed(self) -> None:
+        client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        client.actron_serial = "SER1"
+        client._min_fan_mode_interval = 1
+        client._last_fan_mode_change = datetime.now() - timedelta(minutes=5)
+        client.send_command = AsyncMock(return_value={})
+        with patch(
+            "custom_components.actronair_neo.api.client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
+            await client.set_fan_mode("HIGH", continuous=True)
+        mock_sleep.assert_not_awaited()
+        assert client._continuous_fan is True
+        command = client.send_command.call_args.args[1]
+        assert command["command"]["UserAirconSettings.FanMode"] == "HIGH+CONT"
+
+    @pytest.mark.asyncio
+    async def test_zero_retries_sends_nothing(self) -> None:
+        client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        client.actron_serial = "SER1"
+        client.send_command = AsyncMock(return_value={})
+        with patch("custom_components.actronair_neo.api.client.MAX_RETRIES", 0):
+            await client.set_fan_mode("HIGH")
+        client.send_command.assert_not_called()
+        assert client._last_fan_mode_change is None

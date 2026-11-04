@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Development: every integration module is now included in coverage, and the suite meets Home Assistant's `test-coverage` quality-scale rule (every module above 95%; 99.2% lines overall). CI fails below 95% combined line and branch coverage. Config-flow tests cover every step, error and abort path through the flow manager (#225).
+
 - Repair issues belong to their config entry. Each ActronAir Neo entry gets its own "Device offline", "Sensor unavailable" and "API authentication failed" issues instead of sharing one, so one system no longer clears or overwrites another's. Issues are refreshed with Home Assistant 2026.11's issue-registry refresh, which keeps issues you ignored ignored, and Home Assistant removes them when the entry is deleted. Issues created by earlier versions are cleaned up once (#216).
 
 - **Requires Home Assistant 2026.11.0 or later.** Climate entities use Home Assistant 2026.11's native temperature properties directly; the Home Assistant 2026.10 compatibility aliases are removed. HACS keeps users on older Home Assistant versions on the previous release.

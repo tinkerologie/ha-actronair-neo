@@ -5,7 +5,19 @@ executed at import time, so simply importing every name ensures 100%
 line coverage for the module.
 """
 
+import pytest
+
 from custom_components.actronair_neo import types as t
+from custom_components.actronair_neo.api.models import (
+    FALLBACK_SUPPORTED_MODES,
+    ActronAirUserInfo,
+    DeviceInfo,
+    MainData,
+    ModeSupport,
+    OutdoorUnitData,
+    PeripheralData,
+    ZoneData,
+)
 
 
 def test_module_has_all_typeddicts() -> None:
@@ -264,3 +276,134 @@ def test_api_response_keys() -> None:
     """Verify ApiResponse total=False allows partial dicts."""
     data = t.ApiResponse(success=True)
     assert data["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# api/models.py validators
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (22.5, 22.5),
+        ("21", 21.0),
+        (999.9, 999.9),
+        (1000, None),
+        (3000.0, None),
+        ("abc", None),
+        ([1], None),
+        (True, None),
+        (False, None),
+        (None, None),
+    ],
+)
+def test_temperature_sentinels(raw, expected):
+    zone = ZoneData(name="Z", temp=raw, MinCoolSetpoint=raw, MaxHeatSetpoint=raw)
+    assert zone.temp == expected
+    assert zone.min_cool_setpoint == expected
+    assert zone.max_heat_setpoint == expected
+    main = MainData(indoor_temp=raw, outdoor_temp=raw)
+    assert main.indoor_temp == expected
+    assert main.outdoor_temp == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (0, 0.0),
+        (55.5, 55.5),
+        ("40", 40.0),
+        (100, 100.0),
+        (100.1, None),
+        (-0.1, None),
+        (3000.0, None),
+        ("NA", None),
+        ({}, None),
+        (True, None),
+        (None, None),
+    ],
+)
+def test_humidity_bounds(raw, expected):
+    assert ZoneData(name="Z", humidity=raw).humidity == expected
+    assert MainData(indoor_humidity=raw).indoor_humidity == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (2, 2),
+        (0, 0),
+        ("3", 3),
+        (" 1 ", 1),
+        ("NA", None),
+        ("", None),
+        ("-1", None),
+        (2.5, None),
+        (True, None),
+        (None, None),
+    ],
+)
+def test_coerce_signal(raw, expected):
+    assert ZoneData(name="Z", signal_strength=raw).signal_strength == expected
+    assert PeripheralData(Signal_of3=raw).signal_of3 == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(12345, "12345"), ("ABC", "ABC"), (True, None), (None, None)],
+)
+def test_optional_serial_coercion(raw, expected):
+    assert PeripheralData(SerialNumber=raw).serial_number == expected
+    main = MainData(serial_number=raw, indoor_model=raw)
+    assert main.serial_number == expected
+    assert main.indoor_model == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(561, "561"), ("X", "X"), (None, ""), (False, "")],
+)
+def test_required_string_coercion(raw, expected):
+    main = MainData(model=raw, firmware_version=raw)
+    assert (main.model, main.firmware_version) == (expected, expected)
+    outdoor = OutdoorUnitData(
+        model_number=raw,
+        family=raw,
+        ctrl_board_type=raw,
+        software_version=raw,
+        SerialNumber=raw,
+    )
+    assert outdoor.model_number == expected
+    assert outdoor.family == expected
+    assert outdoor.ctrl_board_type == expected
+    assert outdoor.software_version == expected
+    assert outdoor.serial_number == expected
+
+
+def test_device_info_coerces_strings():
+    info = DeviceInfo(serial=None, name=42, type=True, id=7)
+    assert (info.serial, info.name, info.type, info.id) == ("", "42", "", "7")
+
+
+def test_mode_support_defaults_and_dry():
+    assert ModeSupport().supported_modes == ["COOL", "HEAT", "FAN", "AUTO"]
+    support = ModeSupport(Cool=False, Heat=True, Fan=False, Auto=False, Dry=True)
+    assert support.supported_modes == ["HEAT", "DRY"]
+
+
+def test_mode_support_all_disabled_uses_fallback():
+    support = ModeSupport(Cool=False, Heat=False, Fan=False, Auto=False, Dry=False)
+    assert support.supported_modes == list(FALLBACK_SUPPORTED_MODES)
+
+
+@pytest.mark.parametrize("alias", ["id", "sub", "userId"])
+def test_user_info_id_aliases(alias):
+    info = ActronAirUserInfo.model_validate({alias: "user-1", "email": "a@b.c"})
+    assert info.id == "user-1"
+    assert info.email == "a@b.c"
+    assert info.name == ""
+
+
+def test_user_info_defaults():
+    assert ActronAirUserInfo.model_validate({}).id == ""
