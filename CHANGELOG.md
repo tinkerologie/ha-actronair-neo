@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Development: HA Next no longer fails when GitHub rate-limits its runners. The resolver reads Home Assistant source files through the authenticated GitHub API, retries rate limits and server errors briefly, and reports the cause when resolution still fails (#231).
 - A system status request no longer hangs when another, identical request it was waiting on is cancelled, for example while the integration reloads. The waiting request now fetches the status itself (#227).
 
 ### Changed
