@@ -16,9 +16,14 @@ applyTo: "tests/**/*.py"
 
 ```toml
 # pyproject.toml [test] extras already includes:
-# pytest-homeassistant-custom-component
-# pytest-asyncio
+# pytest-homeassistant  (Home Assistant's official plugin; loads automatically)
+# pytest-asyncio, pytest-freezer, pytest-cov, pytest-timeout, pytest-xdist
 ```
+
+`pytest-homeassistant` must match the Home Assistant release it was built from.
+The `dev` extra pins `homeassistant` exactly, and `[tool.uv.sources]` pins the
+plugin to the Core commit for that release. Update both together. Never install
+the retired `pytest-homeassistant-custom-component` alongside it.
 
 ```bash
 # Run all tests
@@ -42,7 +47,7 @@ script/test --cov-html
 from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.actronair_neo.const import DOMAIN
 
@@ -99,7 +104,8 @@ with patch("...get_ac_status", side_effect=AuthenticationError("bad creds")):
 
 Common fixtures belong in `tests/conftest.py`:
 
-- `hass` — provided by `pytest-homeassistant-custom-component`
+- `hass` — provided by `pytest-homeassistant`; custom integrations are enabled by
+  default, so do not request `enable_custom_integrations`
 - `mock_config_entry` — standard `MockConfigEntry` for `actronair_neo`
 - `mock_api_wrapper` — `AsyncMock` of `ActronNeoApiWrapper`
 

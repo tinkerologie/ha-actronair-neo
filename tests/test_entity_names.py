@@ -18,7 +18,6 @@ async def test_entity_names_use_translations(
     mock_config_entry_with_zones,
     mock_api,
     mock_api_response,
-    enable_custom_integrations,
 ):
     """Translated names apply, zone names fill placeholders and IDs are kept."""
     response = copy.deepcopy(mock_api_response)

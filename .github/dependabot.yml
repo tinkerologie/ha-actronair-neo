@@ -15,7 +15,7 @@ updates:
     groups:
       devcontainers-minor-patch:
         patterns:
-          - '*'
+          - "*"
         update-types:
           - minor
           - patch
@@ -32,7 +32,7 @@ updates:
     groups:
       actions-minor-patch:
         patterns:
-          - '*'
+          - "*"
         update-types:
           - minor
           - patch
@@ -50,18 +50,14 @@ updates:
     groups:
       production-minor-patch:
         patterns:
-          - homeassistant
-          - pytest-homeassistant-custom-component
           - colorlog
         update-types:
           - minor
           - patch
       dev-minor-patch:
         patterns:
-          - '*'
+          - "*"
         exclude-patterns:
-          - homeassistant
-          - pytest-homeassistant-custom-component
           - colorlog
         update-types:
           - minor
@@ -69,15 +65,18 @@ updates:
     cooldown:
       default-days: 3
       semver-major-days: 7
-    # Packages pytest-homeassistant-custom-component pins exactly (==). Bumping one on
-    # its own makes the lock unsatisfiable and fails the whole update run, so they
-    # move only when pytest-homeassistant-custom-component does (STANDARDS.md §6).
+    # homeassistant is pinned exactly and moves only together with the
+    # pytest-homeassistant Core commit in [tool.uv.sources]; Dependabot cannot
+    # advance that Git revision, so maintainers update both by hand. The other
+    # entries are packages pytest-homeassistant pins exactly (==): bumping one
+    # on its own makes the lock unsatisfiable and fails the whole update run, so
+    # they move only with the plugin (STANDARDS.md §6).
     ignore:
+      - dependency-name: homeassistant
       - dependency-name: freezegun
       - dependency-name: pytest
       - dependency-name: pytest-asyncio
-      - dependency-name: pytest-cov
-      - dependency-name: pytest-timeout
+      - dependency-name: pytest-freezer
       - dependency-name: pytest-xdist
       - dependency-name: respx
       - dependency-name: syrupy
@@ -96,7 +95,7 @@ updates:
     groups:
       docker-minor-patch:
         patterns:
-          - '*'
+          - "*"
         update-types:
           - minor
           - patch

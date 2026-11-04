@@ -123,9 +123,12 @@ Import-time class-migration messages are covered by the import smoke script.
 
 **HA Next** runs weekly and on manual dispatch, independently of PR checks. The
 `pypi` channel resolves the newest compatible Home Assistant version, including
-betas, and runs tests only when a matching test harness exists. The `dev` channel
-installs Core's development branch; its harness is unavailable, so tests are
-explicitly skipped. Both channels check imports and run Hassfest against that
+betas, and finds Home Assistant's official `pytest-homeassistant` plugin for it:
+an exact PyPI release when one is published, otherwise the in-tree plugin at the
+Core tag of the same version. The `dev` channel resolves Core `dev` to one commit
+and installs Home Assistant and the in-tree plugin from that commit. Each channel
+runs tests when a plugin source exists; when none does, tests are skipped and
+the summary and issue record why. Both channels check imports and run Hassfest against that
 channel's Core version. Failures open or update one `ha-next` + `bug` issue per
 channel; passing checks close the issue.
 
@@ -143,15 +146,25 @@ Local commands (activate the intended Home Assistant environment first):
 ```sh
 source .local/ha-venv/bin/activate
 script/test
-uv run --no-project --with packaging script/ha-next/resolve_versions.py
+uv run --no-project --with packaging script/ha-next/resolve_versions.py pypi
+uv run --no-project --with packaging script/ha-next/resolve_versions.py dev
 python script/ha-next/import_check.py
 HA_VERSION=2026.11.0b0 script/hassfest
 HA_VERSION=dev script/hassfest
 uv run --no-project --with defusedxml --with beautifulsoup4 script/ha-dev-blog/scan.py --days 7 --output .ai-scratch/blog-results.json
 ```
 
-The resolver prints exact HA and harness versions; it does not change the local
-HA installation. Use an isolated environment when installing those versions.
+The resolver prints the channel's Home Assistant requirement and the plugin
+source (`pypi`, `git` or empty), requirement and note; it does not change the
+local HA installation.
+
+The project's own lock pins `homeassistant` exactly in the `dev` extra and the
+plugin to the matching Core commit in `[tool.uv.sources]`, because the
+2026.11.0 plugin is not on PyPI yet (home-assistant/core#190470). To move to a
+new Home Assistant release, update the `homeassistant==` pin and the Core
+commit SHA together, then run `uv lock`. Dependabot ignores both. Once a
+matching `pytest-homeassistant` release is on PyPI, pin it exactly and remove
+the Git source. Use an isolated environment when installing those versions.
 `script/hassfest` supports both the old validator and `packages/hassfest`, repairs
 existing sparse checkouts, and refreshes `dev` to the fetched commit each run.
 The blog scanner is read-only; its separate issue-filing command requires an
