@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Deprecation checks fail CI for Python warnings and Home Assistant deprecation logs attributed to this integration. Weekly HA Next checks the newest PyPI release (including betas) and Core `dev`, with one tracked issue per failing channel. A weekly developer-blog watcher files deduplicated enhancement issues when change announcements name identifiers used by the integration (#210).
 
+### Fixed
+
+- A system status request no longer hangs when another, identical request it was waiting on is cancelled, for example while the integration reloads. The waiting request now fetches the status itself (#227).
+
 ### Changed
 
 - Development: every integration module is now included in coverage, and the suite meets Home Assistant's `test-coverage` quality-scale rule (every module above 95%; 99.2% lines overall). CI fails below 95% combined line and branch coverage. Config-flow tests cover every step, error and abort path through the flow manager (#225).

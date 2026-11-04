@@ -520,6 +520,53 @@ class ActronAirNeoApiClient:
             return API_URL_QUE
         return API_URL
 
+    @staticmethod
+    async def _await_pending_request(
+        pending: asyncio.Future[Any], serial: str
+    ) -> dict[str, Any] | None:
+        """
+        Wait for another caller's in-flight request for the same system.
+
+        Return its response, or None when the caller should issue its own
+        request because the shared request failed or its owner was cancelled.
+        """
+        try:
+            # Shield so cancelling this waiter never cancels the shared
+            # future that the owner and other waiters depend on.
+            return cast("dict[str, Any]", await asyncio.shield(pending))
+        except asyncio.CancelledError:
+            # The owner cancels the shared future when it is itself cancelled;
+            # only then issue our own request. Re-raise when this task is the
+            # one being cancelled.
+            task = asyncio.current_task()
+            if not pending.cancelled() or (task is not None and task.cancelling()):
+                raise
+            _LOGGER.debug(
+                "Pending request for %s was cancelled; issuing new request", serial
+            )
+        except (ActronAirNeoError, TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.debug(
+                "Pending request for %s failed (%s); issuing new request",
+                serial,
+                err,
+            )
+        return None
+
+    @staticmethod
+    def _release_pending_future(future: asyncio.Future[Any]) -> None:
+        """Settle a published request future as its owner exits."""
+        if not future.done():
+            # The owner exited without a result or error (e.g. it was
+            # cancelled): cancel the future so waiters are released instead
+            # of hanging.
+            future.cancel()
+        elif not future.cancelled():
+            # Safety net: retrieve any exception set via a path that bypassed
+            # the except block, to prevent asyncio's "Future exception was
+            # never retrieved" warning.
+            with contextlib.suppress(Exception):
+                future.exception()
+
     async def get_ac_status(
         self,
         serial: str,
@@ -541,16 +588,10 @@ class ActronAirNeoApiClient:
 
         # Check for pending request (deduplication)
         request_key = f"get_ac_status_{serial}"
-        if request_key in self._pending_requests:
-            try:
-                response = await self._pending_requests[request_key]
-                return cast("dict[str, Any]", response)
-            except (ActronAirNeoError, TimeoutError, aiohttp.ClientError) as err:
-                _LOGGER.debug(
-                    "Pending request for %s failed (%s); issuing new request",
-                    serial,
-                    err,
-                )
+        if (pending := self._pending_requests.get(request_key)) is not None:
+            shared_response = await self._await_pending_request(pending, serial)
+            if shared_response is not None:
+                return shared_response
 
         # Create new request future
         future: asyncio.Future[Any] = asyncio.Future()
@@ -586,12 +627,7 @@ class ActronAirNeoApiClient:
                 future.exception()
             raise
         finally:
-            # Safety net: if the future holds an unretrieved exception (e.g. set
-            # via a code path that bypassed the except block), retrieve it here
-            # to prevent the asyncio "Future exception was never retrieved" warning.
-            if future.done():
-                with contextlib.suppress(Exception):
-                    future.exception()
+            self._release_pending_future(future)
             self._pending_requests.pop(request_key, None)
 
     @property
