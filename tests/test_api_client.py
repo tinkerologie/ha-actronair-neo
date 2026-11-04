@@ -1402,14 +1402,124 @@ class TestGetAcStatusFutureEdges:
         assert key not in client._pending_requests
 
     @pytest.mark.asyncio
-    async def test_cancellation_leaves_future_pending_and_cleans_up(self) -> None:
-        """Cancellation bypasses the except block; finally still cleans up."""
+    async def test_cancellation_cancels_future_and_cleans_up(self) -> None:
+        """A cancelled owner cancels its published future and removes the key."""
         session = _mock_session()
-        session.request = MagicMock(side_effect=asyncio.CancelledError)
         client = ActronAirNeoApiClient(_mock_auth(), session)
+        published: list[asyncio.Future] = []
+
+        def _request(*args, **kwargs):
+            published.append(client._pending_requests["get_ac_status_SER1"])
+            raise asyncio.CancelledError
+
+        session.request = MagicMock(side_effect=_request)
         with pytest.raises(asyncio.CancelledError):
             await client.get_ac_status("SER1")
+        assert published[0].cancelled()
         assert "get_ac_status_SER1" not in client._pending_requests
+
+
+_STATUS_PAYLOAD = {"lastKnownState": {"ok": True}}
+
+
+class _GatedRequests:
+    """Fake ``_make_request``: gated, counted, first call optionally blocks."""
+
+    def __init__(self, *, block_first: bool) -> None:
+        self.calls = 0
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self._block_first = block_first
+
+    async def __call__(self, *args, **kwargs):
+        self.calls += 1
+        self.started.set()
+        if self._block_first and self.calls == 1:
+            await asyncio.Event().wait()  # blocks until cancelled
+        await self.release.wait()
+        return dict(_STATUS_PAYLOAD)
+
+
+class TestGetAcStatusCancellation:
+    """Deduplicated get_ac_status survives owner and waiter cancellation (#227)."""
+
+    @pytest.mark.asyncio
+    async def test_release_pending_future_settles_every_state(self) -> None:
+        release = ActronAirNeoApiClient._release_pending_future
+        loop = asyncio.get_running_loop()
+
+        pending = loop.create_future()
+        release(pending)
+        assert pending.cancelled()
+
+        already_cancelled = loop.create_future()
+        already_cancelled.cancel()
+        release(already_cancelled)
+        assert already_cancelled.cancelled()
+
+        failed = loop.create_future()
+        failed.set_exception(ApiError("boom"))
+        release(failed)  # retrieves the exception; no "never retrieved" warning
+        assert isinstance(failed.exception(), ApiError)
+
+        done = loop.create_future()
+        done.set_result({"ok": True})
+        release(done)
+        assert done.result() == {"ok": True}
+
+    @pytest.mark.asyncio
+    async def test_waiter_reissues_when_owner_cancelled(self) -> None:
+        client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        fake = _GatedRequests(block_first=True)
+        client._make_request = fake  # type: ignore[method-assign]
+        key = "get_ac_status_SER1"
+
+        owner = asyncio.create_task(client.get_ac_status("SER1", use_cache=False))
+        await asyncio.wait_for(fake.started.wait(), 1)
+        waiter = asyncio.create_task(client.get_ac_status("SER1", use_cache=False))
+        await asyncio.sleep(0)
+
+        owner.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await owner
+        fake.release.set()
+        assert await asyncio.wait_for(waiter, 1) == _STATUS_PAYLOAD
+        assert fake.calls == 2
+        assert key not in client._pending_requests
+
+        # Deduplication still works afterwards: two calls, one request.
+        fake.release.clear()
+        first = asyncio.create_task(client.get_ac_status("SER1", use_cache=False))
+        second = asyncio.create_task(client.get_ac_status("SER1", use_cache=False))
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        fake.release.set()
+        results = await asyncio.wait_for(asyncio.gather(first, second), 1)
+        assert results == [_STATUS_PAYLOAD, _STATUS_PAYLOAD]
+        assert fake.calls == 3
+
+    @pytest.mark.asyncio
+    async def test_cancelled_waiter_does_not_cancel_shared_request(self) -> None:
+        client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        fake = _GatedRequests(block_first=False)
+        client._make_request = fake  # type: ignore[method-assign]
+
+        owner = asyncio.create_task(client.get_ac_status("SER1", use_cache=False))
+        await asyncio.wait_for(fake.started.wait(), 1)
+        shared = client._pending_requests["get_ac_status_SER1"]
+        waiter_a = asyncio.create_task(client.get_ac_status("SER1", use_cache=False))
+        waiter_b = asyncio.create_task(client.get_ac_status("SER1", use_cache=False))
+        await asyncio.sleep(0)
+
+        waiter_a.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter_a
+        assert not shared.cancelled()
+
+        fake.release.set()
+        assert await asyncio.wait_for(owner, 1) == _STATUS_PAYLOAD
+        assert await asyncio.wait_for(waiter_b, 1) == _STATUS_PAYLOAD
+        assert fake.calls == 1
 
 
 class TestSetFanModeBranches:

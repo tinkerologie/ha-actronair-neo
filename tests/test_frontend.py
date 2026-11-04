@@ -1,6 +1,9 @@
 """Verify card resource ownership and safe optional frontend registration."""
 
 import asyncio
+import hashlib
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
@@ -203,8 +206,13 @@ def test_resource_collection_with_lovelace(hass):
 
 
 def test_versioned_url_includes_version_and_digest():
-    url = _versioned_url()
-    assert url.startswith(BUNDLE_URL + "?v=")
+    integration = Path(__file__).parents[1] / "custom_components" / "actronair_neo"
+    version = json.loads((integration / "manifest.json").read_text())["version"]
+    bundle = integration / "frontend" / "actronair-neo-cards.js"
+    digest = hashlib.sha256(bundle.read_bytes()).hexdigest()[:12]
+    assert _versioned_url() == (
+        f"/actronair_neo_frontend/actronair-neo-cards.js?v={version}-{digest}"
+    )
 
 
 async def test_reconcile_updates_non_module_and_suppresses_missing_delete(hass):
