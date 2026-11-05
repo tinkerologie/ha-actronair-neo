@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ha-actronair-neo"
-version = "2026.11.0"
+version = "2026.11.1"
 description = "Home Assistant integration for ActronAir Neo"
 readme = "README.md"
 license = {text = "Apache-2.0"}
