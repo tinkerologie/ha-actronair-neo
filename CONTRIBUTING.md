@@ -156,7 +156,11 @@ uv run --no-project --with defusedxml --with beautifulsoup4 script/ha-dev-blog/s
 
 The resolver prints the channel's Home Assistant requirement and the plugin
 source (`pypi`, `git` or empty), requirement and note; it does not change the
-local HA installation.
+local HA installation. It reads Core files through the GitHub API; export
+`GITHUB_TOKEN` (for example `export GITHUB_TOKEN=$(gh auth token)`) to avoid
+unauthenticated API limits. Rate limits and server errors are retried briefly;
+if resolution still fails, the note names the cause and the command exits
+non-zero.
 
 The project's own lock pins `homeassistant` exactly in the `dev` extra and the
 plugin to the matching Core commit in `[tool.uv.sources]`, because the

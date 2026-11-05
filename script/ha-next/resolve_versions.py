@@ -6,11 +6,16 @@ import argparse
 import json
 import os
 import sys
+import time
 import tomllib
+import traceback
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 from packaging.requirements import Requirement
@@ -22,21 +27,115 @@ CORE_REPO = "home-assistant/core"
 PLUGIN_DIR = "packages/pytest-homeassistant"
 NOT_PUBLISHED = "not published on PyPI for this Home Assistant version"
 
+MAX_ATTEMPTS = 3
+BACKOFF_BASE = 2.0
+MAX_RETRY_DELAY = 30.0
+RETRYABLE_STATUSES = frozenset(
+    {
+        HTTPStatus.TOO_MANY_REQUESTS,
+        HTTPStatus.INTERNAL_SERVER_ERROR,
+        HTTPStatus.BAD_GATEWAY,
+        HTTPStatus.SERVICE_UNAVAILABLE,
+        HTTPStatus.GATEWAY_TIMEOUT,
+    }
+)
+
+
+class ResolverHTTPError(Exception):
+    """An HTTP failure after retries, carrying what the failure note needs."""
+
+    def __init__(self, err: HTTPError, url: str, attempts: int) -> None:
+        """Wrap the last HTTPError with its URL and the attempts made."""
+        super().__init__(f"HTTP {err.code} {err.reason}")
+        self.code = err.code
+        self.reason = err.reason
+        self.host = urlsplit(url).hostname or ""
+        self.attempts = attempts
+
+
+def _retry_after(err: HTTPError) -> float | None:
+    """Seconds requested by a Retry-After header (delta or HTTP-date), if any."""
+    value = err.headers.get("Retry-After") if err.headers else None
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return float(value)
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return max(0.0, (when - datetime.now(UTC)).total_seconds())
+
+
+def _rate_limit_reset(err: HTTPError) -> float | None:
+    """Seconds until a primary rate limit resets (x-ratelimit-reset), if exhausted."""
+    headers = err.headers
+    if headers is None or headers.get("x-ratelimit-remaining") != "0":
+        return None
+    reset = (headers.get("x-ratelimit-reset") or "").strip()
+    if not reset.isdigit():
+        return None
+    return max(0.0, float(reset) - time.time())
+
+
+def _is_retryable(err: HTTPError) -> bool:
+    """429/5xx, or a 403 that GitHub marks as a rate limit."""
+    if err.code in RETRYABLE_STATUSES:
+        return True
+    headers = err.headers
+    return (
+        err.code == HTTPStatus.FORBIDDEN
+        and headers is not None
+        and (
+            headers.get("Retry-After") is not None
+            or headers.get("x-ratelimit-remaining") == "0"
+        )
+    )
+
 
 def _get(url: str, accept: str = "application/json") -> bytes | None:
-    """GET a fixed HTTPS URL; return None for 404 (absent release/file/ref)."""
-    headers = {"Accept": accept, "User-Agent": "ha-next-resolver"}
+    """
+    GET a fixed HTTPS URL; return None for 404 (absent release/file/ref).
+
+    Retries rate limits and server errors a few times with a capped delay.
+    The GitHub token is sent only to api.github.com and never on redirects.
+    """
+    request = Request(  # noqa: S310 - Fixed HTTPS hosts only.
+        url, headers={"Accept": accept, "User-Agent": "ha-next-resolver"}
+    )
     if url.startswith("https://api.github.com/") and (
         token := os.environ.get("GITHUB_TOKEN")
     ):
-        headers["Authorization"] = f"Bearer {token}"
-    try:
-        with urlopen(Request(url, headers=headers), timeout=30) as response:  # noqa: S310 - Fixed HTTPS hosts.
-            return response.read()
-    except HTTPError as err:
-        if err.code == HTTPStatus.NOT_FOUND:
-            return None
-        raise
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            with urlopen(request, timeout=30) as response:  # noqa: S310 - Fixed HTTPS hosts.
+                return response.read()
+        except HTTPError as err:
+            if err.code == HTTPStatus.NOT_FOUND:
+                return None
+            if not _is_retryable(err) or attempt == MAX_ATTEMPTS:
+                raise ResolverHTTPError(err, url, attempt) from err
+            # GitHub: honour Retry-After, else wait for x-ratelimit-reset.
+            requested = _retry_after(err)
+            if requested is None:
+                requested = _rate_limit_reset(err)
+            if requested is not None and requested > MAX_RETRY_DELAY:
+                raise ResolverHTTPError(err, url, attempt) from err
+            delay = (
+                requested
+                if requested is not None
+                else min(BACKOFF_BASE * 2 ** (attempt - 1), MAX_RETRY_DELAY)
+            )
+            sys.stderr.write(
+                f"HTTP {err.code} from {urlsplit(url).hostname}; "
+                f"retry {attempt}/{MAX_ATTEMPTS - 1} in {delay:.0f}s\n"
+            )
+            time.sleep(delay)
+    return None  # pragma: no cover - the loop always returns or raises
 
 
 def metadata(project: str, version: str = "") -> dict[str, Any] | None:
@@ -99,8 +198,11 @@ def core_sha(ref: str) -> str | None:
 
 
 def core_file(sha: str, path: str) -> bytes | None:
-    """Read a file from Core at a commit."""
-    return _get(f"https://raw.githubusercontent.com/{CORE_REPO}/{sha}/{path}")
+    """Read a file from Core at a commit through the authenticated contents API."""
+    return _get(
+        f"https://api.github.com/repos/{CORE_REPO}/contents/{quote(path)}?ref={sha}",
+        accept="application/vnd.github.raw+json",
+    )
 
 
 def git_plugin_spec(sha: str) -> str:
@@ -140,7 +242,7 @@ def resolve_dev() -> dict[str, str]:
     sha = core_sha("dev")
     if sha is None:
         msg = "could not resolve the Core dev branch"
-        raise SystemExit(msg)
+        raise RuntimeError(msg)
     root = core_file(sha, "pyproject.toml")
     version = tomllib.loads(root.decode())["project"]["version"] if root else ""
     result = {
@@ -167,12 +269,40 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("channel", choices=("pypi", "dev"), nargs="?", default="pypi")
     channel = parser.parse_args().channel
-    values = resolve_pypi() if channel == "pypi" else resolve_dev()
+    failed = False
+    try:
+        values = resolve_pypi() if channel == "pypi" else resolve_dev()
+    except Exception as err:  # noqa: BLE001 - Any failure becomes a reported note.
+        traceback.print_exc()
+        failed = True
+        values = dict.fromkeys(
+            ("ha_version", "ha_spec", "harness_source", "harness_spec"), ""
+        )
+        values["harness_note"] = failure_note(err)
     output = "".join(f"{key}={value}\n" for key, value in values.items())
     sys.stdout.write(output)
     if path := os.environ.get("GITHUB_OUTPUT"):
         with Path(path).open("a", encoding="utf-8") as stream:
             stream.write(output)
+    if failed:
+        sys.exit(1)
+
+
+def failure_note(err: Exception) -> str:
+    """One-line cause for a failed resolution; never includes request headers."""
+    if isinstance(err, ResolverHTTPError):
+        note = f"resolver failed: HTTP {err.code} {err.reason} from {err.host}"
+        if err.attempts > 1:
+            note += f" after {err.attempts} attempts"
+    elif isinstance(err, URLError):
+        host = urlsplit(err.filename or "").hostname if err.filename else None
+        source = f" from {host}" if host else ""
+        note = f"resolver failed: network error{source}: {err.reason}"
+    elif isinstance(err, TimeoutError):
+        note = f"resolver failed: network timeout: {err}"
+    else:
+        note = f"resolver failed: {type(err).__name__}: {err}"
+    return " ".join(note.split())
 
 
 if __name__ == "__main__":
