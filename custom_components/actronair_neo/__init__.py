@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 import probatio
 from homeassistant.exceptions import (  # type: ignore[import-untyped]
     ConfigEntryAuthFailed,
+    ConfigEntryError,
     ConfigEntryNotReady,
     HomeAssistantError,
     ServiceValidationError,
@@ -114,14 +115,17 @@ PARALLEL_UPDATES = 0
 async def async_migrate_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,  # type: ignore[type-arg]
-) -> bool:
+) -> None:
     """Migrate config entry to a new version."""
     if config_entry.version > 2:  # noqa: PLR2004
-        _LOGGER.error(
-            "Config entry version %s is newer than supported (2)",
-            config_entry.version,
+        raise ConfigEntryError(
+            translation_domain=DOMAIN,
+            translation_key="unsupported_config_version",
+            translation_placeholders={
+                "version": str(config_entry.version),
+                "supported": "2",
+            },
         )
-        return False
 
     if config_entry.version == 1:
         # Keep non-credential data; tokens will be set during reauth.
@@ -134,8 +138,6 @@ async def async_migrate_entry(
             data=new_data,
             version=2,
         )
-
-    return True
 
 
 # ── Integration setup ───────────────────────────────────────────
@@ -209,7 +211,7 @@ def _build_migration_mappings(
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ActronAirNeoConfigEntry
-) -> bool:
+) -> None:
     """Set up ActronAir Neo from a config entry."""
     # After V1→V2 migration, tokens may be missing → trigger reauth.
     _required_token_keys = (
@@ -274,7 +276,6 @@ async def async_setup_entry(
         )
     else:
         hass.async_create_task(repairs.async_check_issues(hass, entry))
-    return True
 
 
 async def _create_api_client(
@@ -324,9 +325,9 @@ async def _create_api_client(
 
 async def async_unload_entry(
     hass: HomeAssistant, entry: ActronAirNeoConfigEntry
-) -> bool:
-    """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+) -> None:
+    """Unload a config entry; raises a translated ConfigEntryError on failure."""
+    await hass.config_entries.async_unload_platforms_or_raise(entry, PLATFORMS)
 
 
 async def async_remove_entry(

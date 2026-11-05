@@ -13,7 +13,7 @@ applyTo: "custom_components/**/services.yaml"
 **Register in `async_setup_entry()`:**
 
 ```python
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Set up actronair_neo from a config entry."""
     ...
     hass.services.async_register(
@@ -30,7 +30,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 **Always remove on unload:**
 
 ```python
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Unload a config entry."""
     ...
     hass.services.async_remove(DOMAIN, "set_away_mode")

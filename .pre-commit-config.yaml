@@ -78,7 +78,10 @@ repos:
         args:
           - --ignore-missing-imports
           - --no-site-packages
-          - --explicit-package-bases
+          # Not --explicit-package-bases: with it, a file subset that omits
+          # frontend.py resolves `.frontend` to the frontend/ asset directory
+          # (an implicit namespace package) instead of the module.
+          - --no-namespace-packages
       - id: pylint
         name: pylint
         entry: pylint

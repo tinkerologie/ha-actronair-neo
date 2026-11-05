@@ -37,11 +37,15 @@ Use `[%key:...]` to reuse translations and avoid duplication:
 {
   "config": {
     "abort": {
-      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]"
     }
   }
 }
 ```
+
+Do not add `reauth_successful` or `reconfigure_successful`:
+`async_update_reload_and_abort` uses Home Assistant's central translations for
+them (HA 2026.10+), so local keys are dead.
 
 ### Entity Translations
 

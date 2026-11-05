@@ -8,6 +8,7 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
+    ConfigEntryError,
     HomeAssistantError,
     ServiceValidationError,
 )
@@ -98,17 +99,19 @@ async def test_async_migrate_entry_v1_updates_data(hass, mock_config_entry):
     entry.data = {"serial_number": "ABC", "system_id": "123"}
     hass.config_entries.async_update_entry = MagicMock()
 
-    result = await integration.async_migrate_entry(hass, entry)
-    assert result is True
+    assert await integration.async_migrate_entry(hass, entry) is None
     hass.config_entries.async_update_entry.assert_called_once()
 
 
-async def test_async_migrate_entry_newer_version_returns_false(hass):
-    """Test migration fails for unsupported newer version."""
+async def test_async_migrate_entry_newer_version_raises(hass):
+    """Migration of an unsupported newer version raises a translated error."""
     entry = MagicMock()
     entry.version = 3
     entry.data = {}
-    assert await integration.async_migrate_entry(hass, entry) is False
+    with pytest.raises(ConfigEntryError) as err:
+        await integration.async_migrate_entry(hass, entry)
+    assert err.value.translation_key == "unsupported_config_version"
+    assert err.value.translation_placeholders == {"version": "3", "supported": "2"}
 
 
 def test_build_migration_mappings():
