@@ -25,6 +25,17 @@ entity naming
 
 **Constructor:** Call `super().__init__(coordinator, ...)` — base handles setup
 
+## Entity ID Changes
+
+Since HA 2026.11 a registry rename updates the entity in place. Any entity class
+that defines `async_added_to_hass`, `async_will_remove_from_hass` or
+`async_prepare_to_add_to_hass` must also define `async_entity_id_changed`
+(decorated `@callback`, calling `super()`), or HA silently removes and re-adds
+it (support ends in 2027.11). Re-key anything stored under `entity_id` there.
+`ActronAirNeoEntity` already does this; a subclass that adds its own
+add/remove hook needs its own override. `tests/test_entity.py` checks every
+class.
+
 ## Entity Descriptions
 
 Where applicable, use `EntityDescription` dataclasses defined at module level.

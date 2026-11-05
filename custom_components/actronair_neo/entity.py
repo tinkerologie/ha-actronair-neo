@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from homeassistant.const import EntityCategory
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import (
     DeviceInfo,  # type: ignore[import-untyped]
 )
@@ -61,6 +62,17 @@ class ActronAirNeoEntity(CoordinatorEntity["ActronDataCoordinator"]):
         """Register loaded entities for permission-checked dashboard discovery."""
         await super().async_added_to_hass()
         register_entity(self)
+
+    @callback
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """
+        Opt in to in-place entity_id changes (Home Assistant 2026.11+).
+
+        Nothing here is keyed on entity_id: the dashboard inventory holds the
+        entity object under its role and zone and reads entity_id live, so a
+        rename needs no re-keying and the entity is not removed and re-added.
+        """
+        super().async_entity_id_changed(old_entity_id)
 
     @property
     def device_info(self) -> DeviceInfo | None:

@@ -75,10 +75,16 @@ repos:
         require_serial: true
         types: [python]
         files: ^custom_components/.+\.py$
+        # Check the whole package, not just the changed files: a subset that
+        # omits frontend.py makes mypy resolve `.frontend` to the frontend/
+        # asset directory (an implicit namespace package). The package is
+        # small, so a full run is fast.
+        pass_filenames: false
         args:
           - --ignore-missing-imports
           - --no-site-packages
           - --explicit-package-bases
+          - custom_components/actronair_neo
       - id: pylint
         name: pylint
         entry: pylint

@@ -103,7 +103,7 @@ async def _run_successful_user_flow(
     with (
         patch(_PATCH_AUTH, return_value=mock_auth),
         patch(_PATCH_API, return_value=mock_api),
-        patch(_PATCH_SETUP, return_value=True),
+        patch(_PATCH_SETUP, return_value=None),
     ):
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -151,7 +151,7 @@ class TestActronConfigFlow:
         with (
             patch(_PATCH_AUTH, return_value=mock_auth),
             patch(_PATCH_API, return_value=mock_api),
-            patch(_PATCH_SETUP, return_value=True),
+            patch(_PATCH_SETUP, return_value=None),
         ):
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -182,7 +182,7 @@ class TestActronConfigFlow:
         with (
             patch(_PATCH_AUTH, return_value=mock_auth),
             patch(_PATCH_API, return_value=mock_api),
-            patch(_PATCH_SETUP, return_value=True),
+            patch(_PATCH_SETUP, return_value=None),
         ):
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -242,7 +242,7 @@ class TestActronConfigFlow:
         with (
             patch(_PATCH_AUTH, return_value=mock_auth) as auth_cls,
             patch(_PATCH_API, return_value=mock_api),
-            patch(_PATCH_SETUP, return_value=True),
+            patch(_PATCH_SETUP, return_value=None),
         ):
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -276,7 +276,7 @@ class TestActronConfigFlow:
         with (
             patch(_PATCH_AUTH, return_value=mock_auth),
             patch(_PATCH_API, return_value=mock_api),
-            patch(_PATCH_SETUP, return_value=True),
+            patch(_PATCH_SETUP, return_value=None),
         ):
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -308,7 +308,7 @@ class TestActronConfigFlow:
         with (
             patch(_PATCH_AUTH, return_value=mock_auth),
             patch(_PATCH_API, return_value=mock_api),
-            patch(_PATCH_SETUP, return_value=True),
+            patch(_PATCH_SETUP, return_value=None),
         ):
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -442,7 +442,7 @@ class TestReauthFlow:
 
         with (
             patch(_PATCH_AUTH, return_value=mock_auth),
-            patch(_PATCH_SETUP, return_value=True),
+            patch(_PATCH_SETUP, return_value=None),
         ):
             result = await mock_config_entry.start_reauth_flow(hass)
             assert result["type"] == FlowResultType.FORM
@@ -488,7 +488,7 @@ class TestReconfigureFlow:
         with (
             patch(_PATCH_AUTH, return_value=mock_auth),
             patch(_PATCH_API, return_value=mock_api),
-            patch(_PATCH_SETUP, return_value=True),
+            patch(_PATCH_SETUP, return_value=None),
         ):
             result = await entry.start_reconfigure_flow(hass)
             assert result["type"] == FlowResultType.FORM

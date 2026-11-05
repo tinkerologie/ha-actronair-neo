@@ -98,17 +98,21 @@ async def async_step_user(self, user_input=None):
 **Setup (`__init__.py`):**
 
 ```python
-async def async_setup_entry(hass, entry):
+async def async_setup_entry(hass, entry) -> None:
     coordinator = ActronDataCoordinator(hass, ...)
     await coordinator.async_config_entry_first_refresh()
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    return True
 
 
-async def async_unload_entry(hass, entry):
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+async def async_unload_entry(hass, entry) -> None:
+    await hass.config_entries.async_unload_platforms_or_raise(entry, PLATFORMS)
 ```
+
+Setup, unload and migrate return `None` (HA 2026.11). Signal failure by raising
+`ConfigEntryNotReady`, `ConfigEntryAuthFailed` or a translated `ConfigEntryError`,
+never by returning `False`. Test patches of `async_setup_entry` use
+`return_value=None`.
 
 ## Rules Summary
 

@@ -19,6 +19,7 @@ from homeassistant.const import (
     UnitOfRatio,
     UnitOfTemperature,
 )
+from homeassistant.core import callback
 
 from .const import (
     ATTR_BATTERY_LEVEL,
@@ -957,6 +958,16 @@ class ActronCompressorEnergySensor(ActronAirNeoEntity, RestoreSensor):
         ) is not None and last_sensor_data.native_value is not None:
             with contextlib.suppress(ValueError, TypeError):
                 self._total_energy = max(0.0, float(str(last_sensor_data.native_value)))
+
+    @callback
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """
+        Opt in to in-place entity_id changes (Home Assistant 2026.11+).
+
+        The restored energy total lives on the entity, and Home Assistant moves
+        restore state to the new entity_id itself, so nothing needs re-keying.
+        """
+        super().async_entity_id_changed(old_entity_id)
 
     @property
     def native_value(self) -> float | None:
