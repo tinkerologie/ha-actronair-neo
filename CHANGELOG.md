@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.11.1] - 2026-11-05
+
+This release replaces 2026.11.0, which was withdrawn because it was built before the changes below were complete. Release tag names cannot be reused, so the version moves to 2026.11.1.
+
 ### Added
 
 - Three bundled, Neo-inspired dashboard cards for system climate controls, zones and system insights. The cards use theme-aware layouts, visual configuration, keyboard-accessible controls and capability-based discovery through a read-only, permission-checked websocket command. Entity IDs, unique IDs and state attributes stay unchanged. Zone airflow setpoints and reported damper position are distinguished; compressor energy is labelled as estimated (#211).
@@ -22,13 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Requires Home Assistant 2026.11.0 or later.** Climate entities use Home Assistant 2026.11's native temperature properties directly; the Home Assistant 2026.10 compatibility aliases are removed. HACS keeps users on older Home Assistant versions on the previous release.
+
 - Renaming an entity ID now updates the entity in place, as Home Assistant 2026.11 supports, instead of removing and re-adding it. Setup, unload and migration follow Home Assistant 2026.11's conventions: they return nothing, an unsupported newer configuration version shows a translated error, and unloading uses `async_unload_platforms_or_raise`. The reauth and reconfigure success messages now come from Home Assistant's shared translations (#232).
 
 - Development: every integration module is now included in coverage, and the suite meets Home Assistant's `test-coverage` quality-scale rule (every module above 95%; 99.2% lines overall). CI fails below 95% combined line and branch coverage. Config-flow tests cover every step, error and abort path through the flow manager (#225).
 
 - Repair issues belong to their config entry. Each ActronAir Neo entry gets its own "Device offline", "Sensor unavailable" and "API authentication failed" issues instead of sharing one, so one system no longer clears or overwrites another's. Issues are refreshed with Home Assistant 2026.11's issue-registry refresh, which keeps issues you ignored ignored, and Home Assistant removes them when the entry is deleted. Issues created by earlier versions are cleaned up once (#216).
-
-- **Requires Home Assistant 2026.11.0 or later.** Climate entities use Home Assistant 2026.11's native temperature properties directly; the Home Assistant 2026.10 compatibility aliases are removed. HACS keeps users on older Home Assistant versions on the previous release.
 
 - Development: tests use Home Assistant's official `pytest-homeassistant` plugin instead of the retiring `pytest-homeassistant-custom-component`, which has no Home Assistant 2026.11 release. The dev lock pins Home Assistant 2026.11.0 and installs the plugin from the Core commit tagged 2026.11.0, because its PyPI upload failed (home-assistant/core#190470); switch to an exact PyPI pin once it is published. Bootstrap now runs a locked sync. `pydantic` is declared explicitly, as the manifest requires, rather than arriving through the old harness. HA Next finds the plugin per channel (PyPI release or Core tag), runs tests against Core `dev` with the in-tree plugin from the same commit, and reports the plugin source or the reason tests were skipped (#218).
 
