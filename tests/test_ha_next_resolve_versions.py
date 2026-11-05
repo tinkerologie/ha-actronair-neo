@@ -25,12 +25,16 @@ SCRIPT = (
 
 
 @pytest.fixture
-def resolver() -> ModuleType:
-    """Load the standalone script (its directory name is not importable)."""
+def resolver(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    """Load the standalone script (its directory name is not importable).
+
+    It is registered in sys.modules so the freezer fixture patches its clock.
+    """
     spec = importlib.util.spec_from_file_location("ha_next_resolve_versions", SCRIPT)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
     return module
 
@@ -138,13 +142,13 @@ def test_503_without_retry_after_backs_off_exponentially(resolver, monkeypatch, 
     assert sleeps == [2.0, 4.0]
 
 
-def test_retry_after_http_date_is_parsed(resolver, monkeypatch, sleeps):
+def test_retry_after_http_date_is_parsed(resolver, monkeypatch, sleeps, freezer):
+    freezer.move_to("2026-11-05T00:00:00+00:00")
     when = format_datetime(datetime.now(UTC) + timedelta(seconds=10), usegmt=True)
     _install(resolver, monkeypatch, _http_error(429, {"Retry-After": when}), b"ok")
 
     assert resolver.core_file("abc", "file") == b"ok"
-    assert len(sleeps) == 1
-    assert 8.0 <= sleeps[0] <= 10.0
+    assert sleeps == [10.0]
 
 
 def test_malformed_retry_after_falls_back_to_backoff(resolver, monkeypatch, sleeps):
@@ -189,7 +193,42 @@ def test_non_retryable_errors_fail_immediately(resolver, monkeypatch, sleeps, co
     assert sleeps == []
 
 
-def test_rate_limited_403_is_retried(resolver, monkeypatch, sleeps):
+def test_rate_limited_403_waits_for_reset(resolver, monkeypatch, sleeps, freezer):
+    freezer.move_to("2026-11-05T00:00:00+00:00")
+    reset = int(datetime.now(UTC).timestamp()) + 7
+    _install(
+        resolver,
+        monkeypatch,
+        _http_error(
+            403, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": str(reset)}
+        ),
+        b"ok",
+    )
+
+    assert resolver.core_file("abc", "file") == b"ok"
+    assert sleeps == [7.0]
+
+
+def test_rate_limit_reset_beyond_cap_fails_without_sleeping(
+    resolver, monkeypatch, sleeps, freezer
+):
+    freezer.move_to("2026-11-05T00:00:00+00:00")
+    reset = int(datetime.now(UTC).timestamp()) + 3600
+    recorder = _install(
+        resolver,
+        monkeypatch,
+        _http_error(
+            403, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": str(reset)}
+        ),
+    )
+
+    with pytest.raises(resolver.ResolverHTTPError):
+        resolver.core_file("abc", "file")
+    assert len(recorder.requests) == 1
+    assert sleeps == []
+
+
+def test_rate_limited_403_without_reset_backs_off(resolver, monkeypatch, sleeps):
     _install(
         resolver,
         monkeypatch,

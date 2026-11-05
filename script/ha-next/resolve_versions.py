@@ -70,6 +70,17 @@ def _retry_after(err: HTTPError) -> float | None:
     return max(0.0, (when - datetime.now(UTC)).total_seconds())
 
 
+def _rate_limit_reset(err: HTTPError) -> float | None:
+    """Seconds until a primary rate limit resets (x-ratelimit-reset), if exhausted."""
+    headers = err.headers
+    if headers is None or headers.get("x-ratelimit-remaining") != "0":
+        return None
+    reset = (headers.get("x-ratelimit-reset") or "").strip()
+    if not reset.isdigit():
+        return None
+    return max(0.0, float(reset) - time.time())
+
+
 def _is_retryable(err: HTTPError) -> bool:
     """429/5xx, or a 403 that GitHub marks as a rate limit."""
     if err.code in RETRYABLE_STATUSES:
@@ -108,7 +119,10 @@ def _get(url: str, accept: str = "application/json") -> bytes | None:
                 return None
             if not _is_retryable(err) or attempt == MAX_ATTEMPTS:
                 raise ResolverHTTPError(err, url, attempt) from err
+            # GitHub: honour Retry-After, else wait for x-ratelimit-reset.
             requested = _retry_after(err)
+            if requested is None:
+                requested = _rate_limit_reset(err)
             if requested is not None and requested > MAX_RETRY_DELAY:
                 raise ResolverHTTPError(err, url, attempt) from err
             delay = (
