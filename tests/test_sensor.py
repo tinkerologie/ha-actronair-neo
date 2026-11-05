@@ -585,3 +585,16 @@ class TestFormatPowerHelper:
         sensor = ActronSystemDiagnosticSensor(coordinator)
         attrs = sensor.extra_state_attributes
         assert attrs["system_capacity"] == "13.0 kW"
+
+
+def test_compressor_energy_entity_id_change_delegates_to_base(coordinator):
+    """The compressor-energy override still runs the base opt-in (#232)."""
+    from unittest.mock import patch as _patch
+
+    from custom_components.actronair_neo.entity import ActronAirNeoEntity
+    from custom_components.actronair_neo.sensor import ActronCompressorEnergySensor
+
+    sensor = ActronCompressorEnergySensor(coordinator)
+    with _patch.object(ActronAirNeoEntity, "async_entity_id_changed") as base:
+        sensor.async_entity_id_changed("sensor.old_compressor_energy")
+    base.assert_called_once_with("sensor.old_compressor_energy")
