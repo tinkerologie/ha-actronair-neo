@@ -569,6 +569,88 @@ class TestActronZoneClimate:
         mock_status["zones"]["zone_1"].update(zone_overrides)
         assert (zone_climate.min_temp, zone_climate.max_temp) == expected
 
+    @pytest.mark.parametrize(
+        ("platform", "main_overrides", "expected"),
+        [
+            pytest.param(
+                "que",
+                {"variance_below_cool": -3.0, "variance_above_cool": 0.0},
+                (21.0, 24.0),
+                id="que_zero_above_holds_max_at_master",
+            ),
+            pytest.param(
+                "que",
+                {"variance_below_cool": 0.0, "variance_above_cool": 3.0},
+                (24.0, 27.0),
+                id="que_zero_below_holds_min_at_master",
+            ),
+            pytest.param(
+                "que",
+                {},
+                (24.0, 24.0),
+                id="que_all_zero_holds_zone_at_master",
+            ),
+            pytest.param(
+                "que",
+                {"variance_below_cool": -0.0, "variance_above_cool": 0.0},
+                (24.0, 24.0),
+                id="que_negative_zero_treated_as_zero",
+            ),
+            pytest.param(
+                "que",
+                {"variance_below_cool": -3.0, "variance_above_cool": 3.0},
+                (21.0, 27.0),
+                id="que_non_zero_variance_unchanged",
+            ),
+            pytest.param(
+                "que",
+                {"variance_below_cool": None, "variance_above_cool": None},
+                (20.0, 28.0),
+                id="que_missing_variance_uses_legacy",
+            ),
+            pytest.param(
+                "que",
+                {
+                    "mode": "HEAT",
+                    "variance_below_heat": 0.0,
+                    "variance_above_heat": 7.0,
+                },
+                (22.0, 29.0),
+                id="que_heat_mode_uses_heat_fields",
+            ),
+            pytest.param(
+                "neo",
+                {},
+                (20.0, 28.0),
+                id="neo_all_zero_still_falls_through",
+            ),
+        ],
+    )
+    def test_zone_bounds_zero_variance_by_platform(
+        self, zone_climate, mock_status, platform, main_overrides, expected
+    ):
+        """Test a zero signed variance is a limit on Que and unused on Neo."""
+        zone_climate.coordinator.api.platform = platform
+        mock_status["main"].update(
+            {
+                "mode": "COOL",
+                "compressor_state": "COOL",
+                "temp_setpoint_cool": 24.0,
+                "temp_setpoint_heat": 22.0,
+                "min_temp_cool": 18.0,
+                "max_temp_cool": 28.0,
+                "min_temp_heat": 16.0,
+                "max_temp_heat": 30.0,
+                "variance_below_cool": 0.0,
+                "variance_above_cool": 0.0,
+                "variance_below_heat": 0.0,
+                "variance_above_heat": 0.0,
+                "zone_temp_variance": 4.0,
+                **main_overrides,
+            }
+        )
+        assert (zone_climate.min_temp, zone_climate.max_temp) == expected
+
     @pytest.mark.asyncio
     async def test_set_hvac_mode_off(self, zone_climate, coordinator):
         """Test disabling zone via HVAC mode."""

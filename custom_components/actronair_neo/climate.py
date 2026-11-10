@@ -392,50 +392,68 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
         self._attr_supported_features = features
 
     @staticmethod
-    def _calc_zone_min_bound(
+    def _calc_zone_min_bound(  # noqa: PLR0913
         zone_min: float | None,
         master_target: float | None,
         variance_below: float | None,
         legacy_variance: float,
         abs_min: float,
+        *,
+        zero_variance_is_limit: bool = False,
     ) -> float:
         """
         Calculate zone minimum setpoint bound.
 
         Precedence: explicit zone minimum, then master target minus the
         signed NV_Limits variance, then master target minus the legacy
-        variance, then the system minimum. A zero signed variance means
-        "no constraint" (Neo controllers report 0.0) and falls through.
+        variance, then the system minimum.
+
+        zero_variance_is_limit selects what a zero signed variance means.
+        On Que the signed variances are the configured zone limits, so
+        zero holds this side at the master target (True). Neo and other
+        platforms publish zero as an unused placeholder, so it falls
+        through to the legacy variance (False).
         """
         if zone_min is not None:
             return max(abs_min, float(zone_min))
         if isinstance(master_target, (int, float)):
-            if variance_below:
+            if variance_below or (
+                zero_variance_is_limit and variance_below is not None
+            ):
                 return max(abs_min, float(master_target) - abs(float(variance_below)))
             if legacy_variance > 0:
                 return max(abs_min, float(master_target) - legacy_variance)
         return abs_min
 
     @staticmethod
-    def _calc_zone_max_bound(
+    def _calc_zone_max_bound(  # noqa: PLR0913
         zone_max: float | None,
         master_target: float | None,
         variance_above: float | None,
         legacy_variance: float,
         abs_max: float,
+        *,
+        zero_variance_is_limit: bool = False,
     ) -> float:
         """
         Calculate zone maximum setpoint bound.
 
         Precedence: explicit zone maximum, then master target plus the
         signed NV_Limits variance, then master target plus the legacy
-        variance, then the system maximum. A zero signed variance means
-        "no constraint" (Neo controllers report 0.0) and falls through.
+        variance, then the system maximum.
+
+        zero_variance_is_limit selects what a zero signed variance means.
+        On Que the signed variances are the configured zone limits, so
+        zero holds this side at the master target (True). Neo and other
+        platforms publish zero as an unused placeholder, so it falls
+        through to the legacy variance (False).
         """
         if zone_max is not None:
             return min(abs_max, float(zone_max))
         if isinstance(master_target, (int, float)):
-            if variance_above:
+            if variance_above or (
+                zero_variance_is_limit and variance_above is not None
+            ):
                 return min(abs_max, float(master_target) + abs(float(variance_above)))
             if legacy_variance > 0:
                 return min(abs_max, float(master_target) + legacy_variance)
@@ -450,8 +468,11 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
            (MinHeatSetpoint/MaxHeatSetpoint in heat mode,
             MinCoolSetpoint/MaxCoolSetpoint otherwise).
         2. Master setpoint +/- NV_Limits signed variances
-           (VarianceAboveMaster*/VarianceBelowMaster*). Only non-zero
-           variances apply; zero means "no constraint".
+           (VarianceAboveMaster*/VarianceBelowMaster*). On Que these are
+           the configured zone limits, so zero holds that side at the
+           master setpoint. On Neo and other platforms zero is an unused
+           placeholder and falls through to
+           ZoneTemperatureSetpointVariance_oC.
         3. Master setpoint +/- legacy zone_temp_variance.
         Each side (min and max) resolves independently.
         Always clamped to system min/max limits.
@@ -465,6 +486,8 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
                 mode == "AUTO"
                 and str(main_data.get("compressor_state", "")).upper() == "HEAT"
             )
+            api = getattr(self.coordinator, "api", None)
+            zero_variance_is_limit = getattr(api, "platform", None) == "que"
             abs_min = float(
                 main_data.get("min_temp_heat", MIN_TEMP)
                 if is_heat
@@ -504,7 +527,12 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
                 else None
             )
             min_bound = self._calc_zone_min_bound(
-                zone_min, master_target, var_below, legacy_variance, abs_min
+                zone_min,
+                master_target,
+                var_below,
+                legacy_variance,
+                abs_min,
+                zero_variance_is_limit=zero_variance_is_limit,
             )
 
             raw_max = (
@@ -526,7 +554,12 @@ class ActronZoneClimate(ActronZoneEntity, ClimateEntity):
                 else None
             )
             max_bound = self._calc_zone_max_bound(
-                zone_max, master_target, var_above, legacy_variance, abs_max
+                zone_max,
+                master_target,
+                var_above,
+                legacy_variance,
+                abs_max,
+                zero_variance_is_limit=zero_variance_is_limit,
             )
         except (KeyError, TypeError, ValueError):
             return MIN_TEMP, MAX_TEMP
