@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add a Scheduler switch and a switch for each schedule on supported Neo
-  controllers. Switch state follows controller updates. Confirmation that
-  the controller applies schedule writes is pending (#236).
+  controllers. Live tests confirmed individual schedule writes and MQTT state
+  updates. Direct master commands did not change the scheduler state on the
+  tested controller (#236).
 
 ### Fixed
 

@@ -95,10 +95,10 @@ Each schedule has a switch with the name from the controller.
 If you change the name on the controller, the switch keeps the same entity ID.
 Schedule switches show available settings such as times, days, modes, and setpoints.
 
-Use **Scheduler** to pause or resume all controller schedules.
 Use a schedule switch to enable or disable one schedule.
-Schedule commands are pending confirmation on live hardware.
-If a switch does not change, check the schedule in the ActronAir app or on the wall controller.
+On the tested Neo controller, **Scheduler** changed when a schedule was enabled or disabled.
+Commands to **Scheduler** did not change its state on that controller.
+If a switch does not change, check the ActronAir app or the wall controller.
 
 ## Dashboard cards
 
