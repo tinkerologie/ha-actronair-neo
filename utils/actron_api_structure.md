@@ -810,6 +810,11 @@ Example with synthetic names, times, and zone settings:
 
 When a schedule starts, `UserAirconSettings.ChangeSrc` reports `Scheduler`.
 
+On the tested Neo, `Enabled` follows whether any event is enabled. The NEO
+Connect Android app builds `set-settings` commands with indexed
+`NV_Schedule.Events[n].Enabled` paths. A direct write to
+`NV_Schedule.Enabled` did not change the controller state.
+
 ---
 
 ### NV_QuickTimer

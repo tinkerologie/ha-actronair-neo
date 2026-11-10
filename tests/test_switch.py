@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
 
 from custom_components.actronair_neo.api.push.models import RealtimeConnectionDetails
 from custom_components.actronair_neo.const import DOMAIN
@@ -350,7 +351,7 @@ def load_schedules(hass, mock_config_entry, mock_api, mock_ac_status_response):
         endpoint="broker", port=8883, protocol="ssl", user_id="test-user"
     )
     mock_api.get_ac_status.return_value = mock_ac_status_response
-    mock_api.set_schedule_enabled = AsyncMock()
+    mock_api.set_schedule_events_enabled = AsyncMock()
     mock_api.set_schedule_event_enabled = AsyncMock()
     transport = MagicMock(last_heartbeat=None, start=AsyncMock(), stop=AsyncMock())
 
@@ -467,17 +468,9 @@ async def test_schedule_push_renames_and_removes_events(
 
 
 @pytest.mark.parametrize("enabled", [True, False])
-@pytest.mark.parametrize(
-    "target",
-    [
-        ("scheduler", "set_schedule_enabled", ()),
-        ("schedule_event_0", "set_schedule_event_enabled", (0,)),
-    ],
-)
-async def test_schedule_switches_write_and_refresh(
-    hass, load_schedules, mock_api, enabled, target
+async def test_event_switch_writes_and_refreshes(
+    hass, load_schedules, mock_api, enabled
 ):
-    suffix, api_method, args = target
     await load_schedules(
         {
             "Enabled": not enabled,
@@ -485,14 +478,14 @@ async def test_schedule_switches_write_and_refresh(
         }
     )
     service = "turn_on" if enabled else "turn_off"
-    entity_id = _schedule_entity_id(hass, suffix)
+    entity_id = _schedule_entity_id(hass, "schedule_event_0")
     mock_api.get_ac_status.reset_mock()
     await hass.services.async_call(
         "switch", service, {"entity_id": entity_id}, blocking=True
     )
     await hass.async_block_till_done()
 
-    getattr(mock_api, api_method).assert_awaited_once_with(*args, enabled=enabled)
+    mock_api.set_schedule_event_enabled.assert_awaited_once_with(0, enabled=enabled)
     mock_api.get_ac_status.assert_awaited_with(MOCK_SERIAL, use_cache=False)
     assert hass.states.get(entity_id).state == ("off" if enabled else "on")
 
@@ -522,6 +515,179 @@ async def test_schedule_skips_bad_rows_and_omits_invalid_attributes(
     assert valid.name == "ActronAir Neo Schedule 2"
     assert "enabled_zones" not in valid.attributes
     assert "setpoint_cool" not in valid.attributes
+
+
+@pytest.mark.parametrize("already_resumed", [False, True])
+async def test_scheduler_restores_only_paused_events_after_reload(
+    hass, mock_config_entry, load_schedules, mock_api, already_resumed
+):
+    rows = [
+        {**_SCHEDULE_EVENT, "ID": 0, "Enabled": True},
+        {**_SCHEDULE_EVENT, "ID": 1, "Enabled": False},
+        {**_SCHEDULE_EVENT, "ID": 2, "Enabled": True},
+    ]
+    schedule = {"Enabled": True, "Events": rows}
+
+    async def apply_changes(positions, *, enabled):
+        for position in positions:
+            rows[position]["Enabled"] = enabled
+        schedule["Enabled"] = any(row["Enabled"] for row in rows)
+
+    mock_api.set_schedule_events_enabled = AsyncMock(side_effect=apply_changes)
+    await load_schedules(schedule)
+    scheduler = _schedule_entity_id(hass, "scheduler")
+
+    await hass.services.async_call(
+        "switch", "turn_off", {"entity_id": scheduler}, blocking=True
+    )
+    assert hass.states.get(scheduler).state == "off"
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await load_schedules(schedule)
+    if already_resumed:
+        await apply_changes((0, 2), enabled=True)
+
+    await hass.services.async_call(
+        "switch", "turn_on", {"entity_id": scheduler}, blocking=True
+    )
+    assert hass.states.get(scheduler).state == "on"
+    assert [row["Enabled"] for row in rows] == [True, False, True]
+    if already_resumed:
+        mock_api.set_schedule_events_enabled.assert_awaited_once_with(
+            (0, 2), enabled=False
+        )
+    else:
+        assert mock_api.set_schedule_events_enabled.await_count == 2
+        mock_api.set_schedule_events_enabled.assert_awaited_with((0, 2), enabled=True)
+
+
+async def test_scheduler_requires_selection_before_enabling(
+    hass, load_schedules, mock_api
+):
+    await load_schedules({"Enabled": False, "Events": [_SCHEDULE_EVENT]})
+    scheduler = _schedule_entity_id(hass, "scheduler")
+    await hass.services.async_call(
+        "switch", "turn_off", {"entity_id": scheduler}, blocking=True
+    )
+    with pytest.raises(HomeAssistantError, match="No paused schedules"):
+        await hass.services.async_call(
+            "switch", "turn_on", {"entity_id": scheduler}, blocking=True
+        )
+    mock_api.set_schedule_events_enabled.assert_not_awaited()
+
+
+async def test_scheduler_already_on_does_not_enable_other_events(
+    hass, load_schedules, mock_api
+):
+    await load_schedules(
+        {"Enabled": True, "Events": [{**_SCHEDULE_EVENT, "Enabled": True}]}
+    )
+    scheduler = _schedule_entity_id(hass, "scheduler")
+    await hass.services.async_call(
+        "switch", "turn_on", {"entity_id": scheduler}, blocking=True
+    )
+    mock_api.set_schedule_events_enabled.assert_not_awaited()
+
+
+async def test_scheduler_refuses_to_pause_without_persisting_selection(
+    hass, load_schedules, mock_api
+):
+    await load_schedules(
+        {"Enabled": True, "Events": [{**_SCHEDULE_EVENT, "Enabled": True}]}
+    )
+    scheduler = _schedule_entity_id(hass, "scheduler")
+    with (
+        patch.object(Store, "async_save", new_callable=AsyncMock),
+        pytest.raises(HomeAssistantError, match="Could not save"),
+    ):
+        await hass.services.async_call(
+            "switch", "turn_off", {"entity_id": scheduler}, blocking=True
+        )
+    mock_api.set_schedule_events_enabled.assert_not_awaited()
+
+
+async def test_scheduler_refuses_to_pause_when_events_move_during_save(
+    hass, load_schedules, mock_api
+):
+    event = {**_SCHEDULE_EVENT, "Enabled": True}
+    schedule = {"Enabled": True, "Events": [event]}
+    push = await load_schedules(schedule)
+    scheduler = _schedule_entity_id(hass, "scheduler")
+    save = Store.async_save
+
+    async def save_and_move(store, data):
+        await save(store, data)
+        schedule["Events"] = [{**event, "ID": 1}]
+        await push({"NV_Schedule.Events": schedule["Events"]})
+
+    with (
+        patch.object(Store, "async_save", save_and_move),
+        pytest.raises(HomeAssistantError, match="changed before pausing"),
+    ):
+        await hass.services.async_call(
+            "switch", "turn_off", {"entity_id": scheduler}, blocking=True
+        )
+    mock_api.set_schedule_events_enabled.assert_not_awaited()
+    with pytest.raises(HomeAssistantError, match="cannot be addressed safely"):
+        await hass.services.async_call(
+            "switch", "turn_off", {"entity_id": scheduler}, blocking=True
+        )
+
+
+async def test_scheduler_refuses_to_write_when_api_is_unhealthy(
+    hass, load_schedules, mock_api
+):
+    await load_schedules(
+        {"Enabled": True, "Events": [{**_SCHEDULE_EVENT, "Enabled": True}]}
+    )
+    scheduler = _schedule_entity_id(hass, "scheduler")
+    mock_api.is_api_healthy.return_value = False
+    with pytest.raises(HomeAssistantError, match="schedule data is unavailable"):
+        await hass.services.async_call(
+            "switch", "turn_off", {"entity_id": scheduler}, blocking=True
+        )
+    mock_api.set_schedule_events_enabled.assert_not_awaited()
+
+
+async def test_scheduler_keeps_selection_on_partial_pause_and_rejects_a_changed_event(
+    hass, load_schedules, mock_api
+):
+    rows = [
+        {**_SCHEDULE_EVENT, "ID": 0, "Enabled": True},
+        {**_SCHEDULE_EVENT, "ID": 1, "Enabled": True},
+    ]
+    schedule = {"Enabled": True, "Events": rows}
+    await load_schedules(schedule)
+    scheduler = _schedule_entity_id(hass, "scheduler")
+
+    async def set_master(service):
+        await hass.services.async_call(
+            "switch", service, {"entity_id": scheduler}, blocking=True
+        )
+
+    async def apply_partial_pause(positions, *, enabled):
+        rows[positions[0]]["Enabled"] = enabled
+        schedule["Enabled"] = any(row["Enabled"] for row in rows)
+
+    mock_api.set_schedule_events_enabled.side_effect = apply_partial_pause
+    with pytest.raises(HomeAssistantError, match="did not confirm"):
+        await set_master("turn_off")
+    await set_master("turn_off")
+    mock_api.set_schedule_events_enabled.assert_awaited_with((1,), enabled=False)
+    assert hass.states.get(scheduler).state == "off"
+
+    rows[0]["StartTime"] = "T07:00"
+    mock_api.set_schedule_events_enabled.reset_mock()
+    with pytest.raises(HomeAssistantError, match="paused schedule changed"):
+        await set_master("turn_on")
+    mock_api.set_schedule_events_enabled.assert_not_awaited()
+
+    rows[0]["StartTime"] = _SCHEDULE_EVENT["StartTime"]
+    with pytest.raises(HomeAssistantError, match="did not confirm"):
+        await set_master("turn_on")
+    mock_api.set_schedule_events_enabled.assert_awaited_once_with((0, 1), enabled=True)
+    await set_master("turn_on")
+    mock_api.set_schedule_events_enabled.assert_awaited_with((1,), enabled=True)
+    assert [row["Enabled"] for row in rows] == [True, True]
 
 
 async def test_schedule_event_rejects_ambiguous_addresses(

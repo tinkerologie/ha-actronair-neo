@@ -96,9 +96,12 @@ If you change the name on the controller, the switch keeps the same entity ID.
 Schedule switches show available settings such as times, days, modes, and setpoints.
 
 Use a schedule switch to enable or disable one schedule.
-On the tested Neo controller, **Scheduler** changed when a schedule was enabled or disabled.
-Commands to **Scheduler** did not change its state on that controller.
-If a switch does not change, check the ActronAir app or the wall controller.
+Turn off **Scheduler** to pause the schedules that are on.
+Turn on **Scheduler** to resume the saved schedules.
+Home Assistant keeps the selection after a restart.
+
+If there is no saved selection, turn on a schedule with its own switch.
+If a paused schedule changes, use the individual switches to select the schedules again.
 
 ## Dashboard cards
 
