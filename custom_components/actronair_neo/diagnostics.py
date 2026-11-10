@@ -238,6 +238,22 @@ async def async_get_config_entry_diagnostics(
             },
         }
 
+        if (schedule := coordinator.data.get("schedule")) is not None:
+            # IDs and positions explain write eligibility without sharing names
+            # or household schedules.
+            diagnostics_data["data"]["schedule"] = {
+                "enabled": schedule["enabled"],
+                "events_complete": schedule["events_complete"],
+                "events": [
+                    {
+                        "id": event["id"],
+                        "position": event["position"],
+                        "enabled": event["enabled"],
+                    }
+                    for event in schedule["events"].values()
+                ],
+            }
+
         # Get RemoteZoneInfo for zone capabilities (top-level in lastKnownState)
         remote_zone_info: list[dict[str, Any]] = full_state.get("RemoteZoneInfo", [])
 

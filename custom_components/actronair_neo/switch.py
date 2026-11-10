@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory
+from homeassistant.core import callback
+from homeassistant.helpers import entity_registry as er
 
+from .const import DOMAIN
 from .dashboard import DashboardRole
 from .entity import ActronAirNeoEntity, ActronZoneEntity
 
@@ -18,6 +21,7 @@ if TYPE_CHECKING:
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
     from .coordinator import ActronDataCoordinator
+    from .types import ScheduleEventData
 
 PARALLEL_UPDATES = 0
 
@@ -25,7 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,  # noqa: ARG001
+    hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
@@ -53,6 +57,170 @@ async def async_setup_entry(
     )
 
     async_add_entities(entities)
+    _async_setup_schedule_switches(hass, entry, coordinator, async_add_entities)
+
+
+@callback
+def _async_setup_schedule_switches(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: ActronDataCoordinator,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Add schedule switches and reconcile events for this config entry."""
+    prefix = f"{coordinator.device_id}_switch_schedule_event_"
+    added_ids: set[int] = set()
+    scheduler_added = False
+    checked_registry = False
+
+    @callback
+    def reconcile() -> None:
+        nonlocal scheduler_added, checked_registry
+        if not coordinator.last_update_success or not coordinator.data:
+            return
+        if (schedule := coordinator.data.get("schedule")) is None:
+            return
+
+        events = schedule["events"]
+        removed_ids = added_ids - events.keys()
+        if schedule["events_complete"] and (removed_ids or not checked_registry):
+            registry = er.async_get(hass)
+            if not checked_registry:
+                # Look for events removed from the controller while HA was offline.
+                current_unique_ids = {f"{prefix}{event_id}" for event_id in events}
+                for registered in er.async_entries_for_config_entry(
+                    registry, entry.entry_id
+                ):
+                    if (
+                        registered.domain == "switch"
+                        and registered.platform == DOMAIN
+                        and registered.unique_id.startswith(prefix)
+                        and registered.unique_id not in current_unique_ids
+                    ):
+                        registry.async_remove(registered.entity_id)
+                checked_registry = True
+
+            for event_id in removed_ids:
+                entity_id = registry.async_get_entity_id(
+                    "switch", DOMAIN, f"{prefix}{event_id}"
+                )
+                if entity_id is not None:
+                    registry.async_remove(entity_id)
+            added_ids.intersection_update(events)
+
+        new_entities: list[SwitchEntity] = []
+        if not scheduler_added:
+            scheduler_added = True
+            new_entities.append(ActronSchedulerSwitch(coordinator))
+        for event_id in events:
+            if event_id in added_ids:
+                continue
+            new_entities.append(ActronScheduleEventSwitch(coordinator, event_id))
+            added_ids.add(event_id)
+        if new_entities:
+            async_add_entities(new_entities)
+
+    entry.async_on_unload(coordinator.async_add_listener(reconcile))
+    reconcile()
+
+
+class ActronSchedulerSwitch(ActronAirNeoEntity, SwitchEntity):
+    """Switch for the controller scheduler."""
+
+    _attr_translation_key = "scheduler"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: ActronDataCoordinator) -> None:
+        """Initialize the scheduler switch."""
+        super().__init__(coordinator, "switch", "Scheduler")
+
+    @property
+    def available(self) -> bool:
+        """Return whether the scheduler state is available."""
+        return super().available and bool(
+            self.coordinator.data and "schedule" in self.coordinator.data
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return the reported scheduler state."""
+        schedule = (
+            self.coordinator.data.get("schedule") if self.coordinator.data else None
+        )
+        return schedule["enabled"] if schedule is not None else None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:  # noqa: ARG002
+        """Enable the scheduler."""
+        await self.coordinator.set_schedule_enabled(enabled=True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:  # noqa: ARG002
+        """Disable the scheduler."""
+        await self.coordinator.set_schedule_enabled(enabled=False)
+
+
+class ActronScheduleEventSwitch(ActronAirNeoEntity, SwitchEntity):
+    """Switch for one controller schedule event."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: ActronDataCoordinator, event_id: int) -> None:
+        """Initialize an event switch with an ID that survives renames."""
+        super().__init__(coordinator, "switch", f"schedule_event_{event_id}")
+        self._event_id = event_id
+        self._attr_name = self._event_name(self._event)
+
+    @property
+    def _event(self) -> ScheduleEventData | None:
+        """Return the current event, if present."""
+        schedule = (
+            self.coordinator.data.get("schedule") if self.coordinator.data else None
+        )
+        return schedule["events"].get(self._event_id) if schedule is not None else None
+
+    def _event_name(self, event: ScheduleEventData | None) -> str:
+        """Return the controller name or the fallback name."""
+        return (event.get("name") if event else None) or f"Schedule {self._event_id}"
+
+    @property
+    def suggested_object_id(self) -> str:
+        """Keep a different event with the same name from reusing this ID."""
+        return f"schedule_event_{self._event_id}"
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Update the name before Home Assistant writes the switch state."""
+        if (event := self._event) is not None:
+            self._attr_name = self._event_name(event)
+        super()._handle_coordinator_update()
+
+    @property
+    def available(self) -> bool:
+        """Return whether the event state is available."""
+        return super().available and self._event is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return the reported event state."""
+        return event["enabled"] if (event := self._event) is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return the event settings that the controller reports."""
+        if (event := self._event) is None:
+            return None
+        return {
+            key: value
+            for key, value in event.items()
+            if key not in {"id", "position", "name", "enabled"}
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:  # noqa: ARG002
+        """Enable this event."""
+        await self.coordinator.set_schedule_event_enabled(self._event_id, enabled=True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:  # noqa: ARG002
+        """Disable this event."""
+        await self.coordinator.set_schedule_event_enabled(self._event_id, enabled=False)
 
 
 class ActronAwayModeSwitch(ActronAirNeoEntity, SwitchEntity):

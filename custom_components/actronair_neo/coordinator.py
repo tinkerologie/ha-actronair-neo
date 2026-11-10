@@ -6,8 +6,11 @@ import asyncio
 import contextlib
 import datetime as dt
 import inspect
+import json
 import logging
 from datetime import timedelta
+from hashlib import sha256
+from math import isfinite
 from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.components.climate.const import (
@@ -15,6 +18,7 @@ from homeassistant.components.climate.const import (
 )
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,  # type: ignore[import-untyped]
+    HomeAssistantError,
 )
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import (  # type: ignore[import-untyped]
@@ -77,6 +81,8 @@ from .ssl_helper import async_get_mqtt_ssl_context
 from .zone_presets import ZonePresetManager
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from homeassistant.config_entries import ConfigEntry  # type: ignore[import-untyped]
     from homeassistant.core import HomeAssistant  # type: ignore[import-untyped]
 
@@ -90,6 +96,8 @@ if TYPE_CHECKING:
         MainData,
         OutdoorUnitData,
         PeripheralData,
+        ScheduleData,
+        ScheduleEventData,
         ServicingData,
         SystemStatusData,
         VFTData,
@@ -97,6 +105,7 @@ if TYPE_CHECKING:
     )
 
 _LOGGER = logging.getLogger(__name__)
+_SCHEDULE_CONFIRM_DELAY = 2
 
 _QUE_BROADCAST_METADATA_KEYS: frozenset[str] = frozenset(
     {"event", "type", "wcFirmware", "correlationId", "commandResponse"}
@@ -106,6 +115,17 @@ _QUE_BROADCAST_METADATA_KEYS: frozenset[str] = frozenset(
 def power_format_storage_key(device_id: str) -> str:
     """Return the storage key for a device's persisted CompPower format."""
     return f"{POWER_FORMAT_STORAGE_KEY}_{device_id}"
+
+
+def schedule_resume_storage_key(device_id: str) -> str:
+    """Return the storage key for the scheduler's paused selection."""
+    return f"{DOMAIN}.schedule_resume_{device_id}"
+
+
+def _schedule_event_fingerprint(event: ScheduleEventData) -> str:
+    """Identify an event without including its current enabled state."""
+    settings = {key: value for key, value in event.items() if key != "enabled"}
+    return sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()
 
 
 def _as_float(value: Any) -> float | None:
@@ -176,6 +196,10 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         # Zone state writes update the full EnabledZones array, so they must be
         # serialized across all zones rather than locked per-zone.
         self._zone_state_change_lock = asyncio.Lock()
+        self._schedule_change_lock = asyncio.Lock()
+        self._schedule_resume_store: Store[dict[str, str]] = Store(
+            hass, 1, schedule_resume_storage_key(device_id)
+        )
         # Maps zone index -> (desired_enabled_state, created_at). Each override
         # expires after ZONE_OVERRIDE_TTL so a state the API never confirms does
         # not stick permanently.
@@ -463,6 +487,10 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
                 "connection_meta": connection_meta,
                 "vft": vft_data,
             }
+            if (
+                schedule := self._parse_schedule_data(data_sections["schedule"])
+            ) is not None:
+                result["schedule"] = schedule
 
             self._apply_pending_zone_state_overrides(result)
 
@@ -664,8 +692,88 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
                 "Peripherals", []
             ),
             "nv_limits": last_known_state.get("NV_Limits", {}),
+            "schedule": last_known_state.get("NV_Schedule"),
             "device_section": device_section,
         }
+
+    @staticmethod
+    def _parse_schedule_data(raw: object) -> ScheduleData | None:
+        """Read scheduler state without trusting malformed event rows."""
+        if not isinstance(raw, dict):
+            return None
+        state = cast("dict[str, object]", raw)
+        scheduler_enabled = state.get("Enabled")
+        if not isinstance(scheduler_enabled, bool):
+            return None
+        raw_events = state.get("Events", [])
+        if not isinstance(raw_events, list):
+            return None
+        rows = cast("list[object]", raw_events)
+
+        events: dict[int, ScheduleEventData] = {}
+        for position, raw_event in enumerate(rows):
+            if not isinstance(raw_event, dict):
+                continue
+            row = cast("dict[str, object]", raw_event)
+            event_id = row.get("ID")
+            enabled = row.get("Enabled")
+            if (
+                type(event_id) is not int
+                or event_id < 0
+                or not isinstance(enabled, bool)
+            ):
+                continue
+            if event_id in events:
+                _LOGGER.debug(
+                    "Ignoring duplicate controller schedule event ID %s", event_id
+                )
+                continue
+            events[event_id] = ActronDataCoordinator._parse_schedule_event(
+                row, event_id, position, enabled=enabled
+            )
+        return {
+            "enabled": scheduler_enabled,
+            "events": events,
+            "events_complete": len(events) == len(rows),
+        }
+
+    @staticmethod
+    def _parse_schedule_event(
+        raw: dict[str, object], event_id: int, position: int, *, enabled: bool
+    ) -> ScheduleEventData:
+        """Keep only supported scalar and array values from an event."""
+        event: dict[str, str | int | bool | float | list[bool]] = {
+            "id": event_id,
+            "position": position,
+            "enabled": enabled,
+        }
+        for source, target in (
+            ("Name", "name"),
+            ("Mode", "mode"),
+            ("StartTime", "start_time"),
+            ("EndTime", "end_time"),
+            ("FanMode", "fan_mode"),
+        ):
+            if isinstance(value := raw.get(source), str) and (label := value.strip()):
+                event[target] = label
+        for source, target in (
+            ("DaysOfOperation", "days_of_operation"),
+            ("EnabledZones", "enabled_zones"),
+        ):
+            value = raw.get(source)
+            if isinstance(value, list) and all(
+                isinstance(item, bool) for item in cast("list[object]", value)
+            ):
+                event[target] = cast("list[bool]", value).copy()
+        for source, target in (
+            ("TemperatureSetpoint_Cool_oC", "setpoint_cool"),
+            ("TemperatureSetpoint_Heat_oC", "setpoint_heat"),
+        ):
+            with contextlib.suppress(OverflowError):
+                setpoint = _as_float(raw.get(source))
+                if setpoint is not None and isfinite(setpoint):
+                    event[target] = setpoint
+        return cast("ScheduleEventData", event)
 
     async def _parse_main_data(self, data_sections: dict[str, Any]) -> MainData:
         """
@@ -1862,6 +1970,146 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         """Set away mode."""
         await self.api.set_away_mode(state=state)
         await self._async_refresh_after_command()
+
+    async def set_schedule_enabled(self, *, enabled: bool) -> None:
+        """Pause enabled schedules or resume only the saved selection."""
+        async with self._schedule_change_lock:
+            saved = await self._schedule_resume_store.async_load() or {}
+            schedule = await self._async_refresh_schedule()
+            events = schedule["events"]
+            if any(event["position"] != event_id for event_id, event in events.items()):
+                msg = "Controller schedule events cannot be addressed safely"
+                raise HomeAssistantError(msg)
+
+            if enabled:
+                await self._async_resume_schedules(events, saved)
+            else:
+                await self._async_pause_schedules(schedule, saved)
+
+    def _get_writable_schedule(self) -> ScheduleData:
+        """Require a complete event snapshot before writing schedule settings."""
+        schedule = self.data.get("schedule") if self.data else None
+        if not self.last_update_success or schedule is None:
+            msg = "Controller schedule data is unavailable"
+            raise HomeAssistantError(msg)
+        if not schedule["events_complete"]:
+            msg = "Controller schedule events cannot be addressed safely"
+            raise HomeAssistantError(msg)
+        return schedule
+
+    async def _async_refresh_schedule(self) -> ScheduleData:
+        """Fetch current flags without the status cache or refresh debouncer."""
+        if not self.api.is_api_healthy():
+            msg = "Controller schedule data is unavailable"
+            raise HomeAssistantError(msg)
+        self._force_fresh_on_next_update = True
+        await self.async_refresh()
+        return self._get_writable_schedule()
+
+    async def _async_confirm_schedule(
+        self, matches: Callable[[ScheduleData], bool]
+    ) -> bool:
+        """Allow a controller write to reach status before one more readback."""
+        if matches(await self._async_refresh_schedule()):
+            return True
+        await asyncio.sleep(_SCHEDULE_CONFIRM_DELAY)
+        return matches(await self._async_refresh_schedule())
+
+    async def _async_pause_schedules(
+        self, schedule: ScheduleData, saved: dict[str, str]
+    ) -> None:
+        """Save the enabled events before sending the indexed pause command."""
+        selected = {
+            str(event_id): _schedule_event_fingerprint(event)
+            for event_id, event in schedule["events"].items()
+            if event["enabled"]
+        }
+        if not selected:
+            return
+        # Preserve unchanged events from an earlier partial pause.
+        resume = {
+            key: fingerprint
+            for event_id, event in schedule["events"].items()
+            if (fingerprint := saved.get(key := str(event_id))) is not None
+            and _schedule_event_fingerprint(event) == fingerprint
+        } | selected
+        await self._schedule_resume_store.async_save(resume)
+        if await self._schedule_resume_store.async_load() != resume:
+            msg = "Could not save the enabled schedules before pausing"
+            raise HomeAssistantError(msg)
+        if self._get_writable_schedule() != schedule:
+            if saved:
+                await self._schedule_resume_store.async_save(saved)
+            else:
+                await self._schedule_resume_store.async_remove()
+            msg = "Controller schedules changed before pausing. Try again."
+            raise HomeAssistantError(msg)
+        await self.api.set_schedule_events_enabled(
+            tuple(int(event_id) for event_id in selected), enabled=False
+        )
+        if not await self._async_confirm_schedule(
+            lambda confirmed: (
+                not confirmed["enabled"]
+                and not any(event["enabled"] for event in confirmed["events"].values())
+            )
+        ):
+            msg = "The controller did not confirm that all schedules are paused"
+            raise HomeAssistantError(msg)
+
+    async def _async_resume_schedules(
+        self, events: dict[int, ScheduleEventData], saved: dict[str, str]
+    ) -> None:
+        """Restore saved events only when their settings still match."""
+        if not saved:
+            if any(event["enabled"] for event in events.values()):
+                return
+            msg = "No paused schedules to resume. Enable an individual schedule first."
+            raise HomeAssistantError(msg)
+
+        selected = {
+            event_id: event
+            for event_id, event in events.items()
+            if str(event_id) in saved
+        }
+        if {
+            str(key): _schedule_event_fingerprint(event)
+            for key, event in selected.items()
+        } != saved:
+            msg = "A paused schedule changed. Enable schedules individually."
+            raise HomeAssistantError(msg)
+        positions = tuple(
+            event_id for event_id, event in selected.items() if not event["enabled"]
+        )
+        if positions:
+
+            def resumed(confirmed: ScheduleData) -> bool:
+                return confirmed["enabled"] and all(
+                    (event := confirmed["events"].get(event_id)) is not None
+                    and event["enabled"]
+                    and _schedule_event_fingerprint(event) == saved[str(event_id)]
+                    for event_id in selected
+                )
+
+            await self.api.set_schedule_events_enabled(positions, enabled=True)
+            if not await self._async_confirm_schedule(resumed):
+                msg = "The controller did not confirm that the paused schedules resumed"
+                raise HomeAssistantError(msg)
+        await self._schedule_resume_store.async_remove()
+
+    async def set_schedule_event_enabled(self, event_id: int, *, enabled: bool) -> None:
+        """Set an event only when its ID and position identify the same row."""
+        async with self._schedule_change_lock:
+            schedule = self._get_writable_schedule()
+            if (event := schedule["events"].get(event_id)) is None:
+                msg = "Controller schedule event is unavailable"
+                raise HomeAssistantError(msg)
+            if event["position"] != event_id:
+                msg = "Controller schedule event cannot be addressed safely"
+                raise HomeAssistantError(msg)
+            await self.api.set_schedule_event_enabled(
+                event["position"], enabled=enabled
+            )
+            await self._async_refresh_after_command()
 
     async def set_quiet_mode(self, *, state: bool) -> None:
         """Set quiet mode."""

@@ -116,6 +116,9 @@
       }
     },
     "switch": {
+      "scheduler": {
+        "name": "Scheduler"
+      },
       "away_mode": {
         "name": "Away mode"
       },

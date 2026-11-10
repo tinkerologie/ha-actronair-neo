@@ -737,8 +737,8 @@ class ActronAirNeoApiClient:
         """
         Map a command type and its parameters to a settings payload.
 
-        Returns the ``UserAirconSettings``/``RemoteZoneInfo`` path→value pairs for
-        the command; ``create_command`` adds the ``type`` marker and wrapper.
+        Return the path/value pairs for the command. ``create_command`` adds
+        the ``type`` marker and wrapper.
         """
         match command_type:
             case "ON":
@@ -761,6 +761,22 @@ class ActronAirNeoApiClient:
                 }
             case "AWAY_MODE":
                 return {"UserAirconSettings.AwayMode": params["state"]}
+            case "SCHEDULE_EVENTS_ENABLED":
+                positions = cast("tuple[object, ...] | None", params.get("positions"))
+                if (
+                    not isinstance(positions, tuple)
+                    or not positions
+                    or any(
+                        type(position) is not int or position < 0
+                        for position in positions
+                    )
+                ):
+                    msg = "Schedule event positions must be non-negative integers"
+                    raise ApiError(msg)
+                return {
+                    f"NV_Schedule.Events[{position}].Enabled": params["enabled"]
+                    for position in cast("tuple[int, ...]", positions)
+                }
             case "QUIET_MODE":
                 return {"UserAirconSettings.QuietMode": params["state"]}
             case "SET_ZONE_TEMP":
@@ -1034,6 +1050,19 @@ class ActronAirNeoApiClient:
         """Set away mode."""
         command = self.create_command("AWAY_MODE", state=state)
         await self.send_command(self.actron_serial, command)
+
+    async def set_schedule_events_enabled(
+        self, positions: tuple[int, ...], *, enabled: bool
+    ) -> None:
+        """Set selected controller events in one indexed settings command."""
+        command = self.create_command(
+            "SCHEDULE_EVENTS_ENABLED", positions=positions, enabled=enabled
+        )
+        await self.send_command(self.actron_serial, command)
+
+    async def set_schedule_event_enabled(self, position: int, *, enabled: bool) -> None:
+        """Set one controller schedule event by its list position."""
+        await self.set_schedule_events_enabled((position,), enabled=enabled)
 
     async def set_quiet_mode(self, *, state: bool) -> None:
         """Set quiet mode."""

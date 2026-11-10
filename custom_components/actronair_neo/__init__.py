@@ -46,7 +46,11 @@ from .const import (
     SERVICE_CREATE_ZONE_PRESET,
     SERVICE_FORCE_UPDATE,
 )
-from .coordinator import ActronDataCoordinator, power_format_storage_key
+from .coordinator import (
+    ActronDataCoordinator,
+    power_format_storage_key,
+    schedule_resume_storage_key,
+)
 from .dashboard import async_register_dashboard
 from .exceptions import (
     ApiError,
@@ -333,7 +337,7 @@ async def async_unload_entry(
 async def async_remove_entry(
     hass: HomeAssistant, entry: ActronAirNeoConfigEntry
 ) -> None:
-    """Delete the stored compressor power format when the entry is removed."""
+    """Delete the saved power format and scheduler selection."""
     serial = entry.data.get(CONF_SERIAL_NUMBER)
     if not serial:
         return
@@ -341,6 +345,10 @@ async def async_remove_entry(
         hass, POWER_FORMAT_STORAGE_VERSION, power_format_storage_key(serial)
     )
     await store.async_remove()
+    schedule_store: Store[dict[str, str]] = Store(
+        hass, 1, schedule_resume_storage_key(serial)
+    )
+    await schedule_store.async_remove()
 
 
 async def async_remove_config_entry_device(

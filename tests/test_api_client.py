@@ -701,6 +701,21 @@ class TestCreateCommand:
         cmd = client.create_command("AWAY_MODE", state=True)
         assert cmd["command"]["UserAirconSettings.AwayMode"] is True
 
+    @pytest.mark.parametrize(
+        "position",
+        [
+            {},
+            {"positions": ()},
+            {"positions": (-1,)},
+            {"positions": (True,)},
+            {"positions": ("0",)},
+        ],
+    )
+    def test_schedule_event_requires_valid_position(self, position: dict) -> None:
+        client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        with pytest.raises(ApiError, match="non-negative integers"):
+            client.create_command("SCHEDULE_EVENTS_ENABLED", enabled=False, **position)
+
     def test_quiet_mode(self) -> None:
         client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
         cmd = client.create_command("QUIET_MODE", state=True)
@@ -875,6 +890,41 @@ class TestZoneOperations:
 
 
 class TestHvacMethods:
+    async def test_set_schedule_events_enabled_sends_one_indexed_command(self) -> None:
+        client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        await client.set_system("SER1")
+        client.send_command = AsyncMock()
+
+        await client.set_schedule_events_enabled((0, 2), enabled=True)
+
+        client.send_command.assert_awaited_once_with(
+            "SER1",
+            {
+                "command": {
+                    "type": "set-settings",
+                    "NV_Schedule.Events[0].Enabled": True,
+                    "NV_Schedule.Events[2].Enabled": True,
+                }
+            },
+        )
+
+    async def test_set_schedule_event_enabled_sends_indexed_command(self) -> None:
+        client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        await client.set_system("SER1")
+        client.send_command = AsyncMock()
+
+        await client.set_schedule_event_enabled(2, enabled=False)
+
+        client.send_command.assert_awaited_once_with(
+            "SER1",
+            {
+                "command": {
+                    "type": "set-settings",
+                    "NV_Schedule.Events[2].Enabled": False,
+                }
+            },
+        )
+
     @pytest.mark.asyncio
     async def test_set_climate_mode(self) -> None:
         client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
