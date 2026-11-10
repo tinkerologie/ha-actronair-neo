@@ -119,7 +119,7 @@ class MqttPushTransport(PushTransport):
             {
                 "command": {"type": "getAll"},
                 "correlationId": f"{client_id_prefix}/{uuid.uuid4()}",
-                "OptOutOfLogging": False,
+                "OptOutOfLogging": self._details.opt_out_of_logging,
             }
         )
         with contextlib.suppress(Exception):

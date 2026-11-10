@@ -51,6 +51,10 @@ class RealtimeConnectionDetails(BaseModel):
         default="unknown",
         validation_alias=AliasChoices("userId", "UserId", "user_id", "username"),
     )
+    opt_out_of_logging: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("OptOutOfLogging", "optOutOfLogging"),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -84,6 +88,12 @@ class RealtimeConnectionDetails(BaseModel):
         if isinstance(value, str) and value.isdigit():
             return int(value)
         return 443
+
+    @field_validator("opt_out_of_logging", mode="before")
+    @classmethod
+    def _validate_opt_out_of_logging(cls, value: object) -> bool:
+        """Opt out of logging when the cloud preference is unknown."""
+        return value if isinstance(value, bool) else True
 
     @property
     def uses_tls(self) -> bool:
