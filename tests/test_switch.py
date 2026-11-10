@@ -517,9 +517,9 @@ async def test_schedule_skips_bad_rows_and_omits_invalid_attributes(
     assert "setpoint_cool" not in valid.attributes
 
 
-@pytest.mark.parametrize("already_resumed", [False, True])
+@pytest.mark.parametrize("resume_mode", ["immediate", "already_enabled", "delayed"])
 async def test_scheduler_restores_only_paused_events_after_reload(
-    hass, mock_config_entry, load_schedules, mock_api, already_resumed
+    hass, mock_config_entry, load_schedules, mock_api, resume_mode
 ):
     rows = [
         {**_SCHEDULE_EVENT, "ID": 0, "Enabled": True},
@@ -543,15 +543,30 @@ async def test_scheduler_restores_only_paused_events_after_reload(
     assert hass.states.get(scheduler).state == "off"
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await load_schedules(schedule)
-    if already_resumed:
+    if resume_mode == "already_enabled":
         await apply_changes((0, 2), enabled=True)
+    elif resume_mode == "delayed":
+
+        async def accept_before_applying(positions, *, enabled):
+            readbacks = 0
+
+            async def read_status(*args, **kwargs):
+                nonlocal readbacks
+                readbacks += 1
+                if readbacks == 2:
+                    await apply_changes(positions, enabled=enabled)
+                return mock_api.get_ac_status.return_value
+
+            mock_api.get_ac_status.side_effect = read_status
+
+        mock_api.set_schedule_events_enabled.side_effect = accept_before_applying
 
     await hass.services.async_call(
         "switch", "turn_on", {"entity_id": scheduler}, blocking=True
     )
     assert hass.states.get(scheduler).state == "on"
     assert [row["Enabled"] for row in rows] == [True, False, True]
-    if already_resumed:
+    if resume_mode == "already_enabled":
         mock_api.set_schedule_events_enabled.assert_awaited_once_with(
             (0, 2), enabled=False
         )

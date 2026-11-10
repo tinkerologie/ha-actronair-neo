@@ -81,6 +81,8 @@ from .ssl_helper import async_get_mqtt_ssl_context
 from .zone_presets import ZonePresetManager
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from homeassistant.config_entries import ConfigEntry  # type: ignore[import-untyped]
     from homeassistant.core import HomeAssistant  # type: ignore[import-untyped]
 
@@ -103,6 +105,7 @@ if TYPE_CHECKING:
     )
 
 _LOGGER = logging.getLogger(__name__)
+_SCHEDULE_CONFIRM_DELAY = 2
 
 _QUE_BROADCAST_METADATA_KEYS: frozenset[str] = frozenset(
     {"event", "type", "wcFirmware", "correlationId", "commandResponse"}
@@ -2003,6 +2006,15 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         await self.async_refresh()
         return self._get_writable_schedule()
 
+    async def _async_confirm_schedule(
+        self, matches: Callable[[ScheduleData], bool]
+    ) -> bool:
+        """Allow a controller write to reach status before one more readback."""
+        if matches(await self._async_refresh_schedule()):
+            return True
+        await asyncio.sleep(_SCHEDULE_CONFIRM_DELAY)
+        return matches(await self._async_refresh_schedule())
+
     async def _async_pause_schedules(
         self, schedule: ScheduleData, saved: dict[str, str]
     ) -> None:
@@ -2035,9 +2047,11 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         await self.api.set_schedule_events_enabled(
             tuple(int(event_id) for event_id in selected), enabled=False
         )
-        confirmed = await self._async_refresh_schedule()
-        if confirmed["enabled"] or any(
-            event["enabled"] for event in confirmed["events"].values()
+        if not await self._async_confirm_schedule(
+            lambda confirmed: (
+                not confirmed["enabled"]
+                and not any(event["enabled"] for event in confirmed["events"].values())
+            )
         ):
             msg = "The controller did not confirm that all schedules are paused"
             raise HomeAssistantError(msg)
@@ -2067,14 +2081,17 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
             event_id for event_id, event in selected.items() if not event["enabled"]
         )
         if positions:
+
+            def resumed(confirmed: ScheduleData) -> bool:
+                return confirmed["enabled"] and all(
+                    (event := confirmed["events"].get(event_id)) is not None
+                    and event["enabled"]
+                    and _schedule_event_fingerprint(event) == saved[str(event_id)]
+                    for event_id in selected
+                )
+
             await self.api.set_schedule_events_enabled(positions, enabled=True)
-            confirmed = await self._async_refresh_schedule()
-            if not confirmed["enabled"] or any(
-                (event := confirmed["events"].get(event_id)) is None
-                or not event["enabled"]
-                or _schedule_event_fingerprint(event) != saved[str(event_id)]
-                for event_id in selected
-            ):
+            if not await self._async_confirm_schedule(resumed):
                 msg = "The controller did not confirm that the paused schedules resumed"
                 raise HomeAssistantError(msg)
         await self._schedule_resume_store.async_remove()
