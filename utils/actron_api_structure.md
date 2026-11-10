@@ -785,12 +785,30 @@ System display, lock, and control configuration (partial — large section).
 
 ### NV_Schedule
 
+Example with synthetic names, times, and zone settings:
+
 ```json
 {
-  "Enabled": false,
-  "Events": []
+  "Enabled": true,
+  "Events": [
+    {
+      "ID": 0,
+      "Name": "Daytime cooling",
+      "Enabled": true,
+      "Mode": "COOL",
+      "StartTime": "T06:00",
+      "EndTime": "T22:00",
+      "DaysOfOperation": [true, true, true, true, true, false, false],
+      "EnabledZones": [true, false, false, false, false, false, false, false],
+      "FanMode": "AUTO",
+      "TemperatureSetpoint_Cool_oC": 23.0,
+      "TemperatureSetpoint_Heat_oC": 23.0
+    }
+  ]
 }
 ```
+
+When a schedule starts, `UserAirconSettings.ChangeSrc` reports `Scheduler`.
 
 ---
 

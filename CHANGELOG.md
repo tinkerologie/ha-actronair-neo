@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add a Scheduler switch and a switch for each schedule on supported Neo
+  controllers. Switch state follows controller updates. Confirmation that
+  the controller applies schedule writes is pending (#236).
+
 ### Fixed
 
 - Que (NX Gen) systems again treat a zero `NV_Limits` signed variance as a real limit that holds that side of the zone at the master setpoint, as in 2026.10.0 and in the upstream library. Since 2026.10.1 (#174) a zero was read as "no limit" on every platform, so such a zone could be set as far as the system limit. Neo systems, which publish these keys as an unused `0.0`, keep the 2026.10.1 fall-through to the zone variance (#238).

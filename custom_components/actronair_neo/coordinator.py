@@ -8,6 +8,7 @@ import datetime as dt
 import inspect
 import logging
 from datetime import timedelta
+from math import isfinite
 from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.components.climate.const import (
@@ -15,6 +16,7 @@ from homeassistant.components.climate.const import (
 )
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,  # type: ignore[import-untyped]
+    HomeAssistantError,
 )
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import (  # type: ignore[import-untyped]
@@ -90,6 +92,8 @@ if TYPE_CHECKING:
         MainData,
         OutdoorUnitData,
         PeripheralData,
+        ScheduleData,
+        ScheduleEventData,
         ServicingData,
         SystemStatusData,
         VFTData,
@@ -463,6 +467,10 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
                 "connection_meta": connection_meta,
                 "vft": vft_data,
             }
+            if (
+                schedule := self._parse_schedule_data(data_sections["schedule"])
+            ) is not None:
+                result["schedule"] = schedule
 
             self._apply_pending_zone_state_overrides(result)
 
@@ -664,8 +672,88 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
                 "Peripherals", []
             ),
             "nv_limits": last_known_state.get("NV_Limits", {}),
+            "schedule": last_known_state.get("NV_Schedule"),
             "device_section": device_section,
         }
+
+    @staticmethod
+    def _parse_schedule_data(raw: object) -> ScheduleData | None:
+        """Read scheduler state without trusting malformed event rows."""
+        if not isinstance(raw, dict):
+            return None
+        state = cast("dict[str, object]", raw)
+        scheduler_enabled = state.get("Enabled")
+        if not isinstance(scheduler_enabled, bool):
+            return None
+        raw_events = state.get("Events", [])
+        if not isinstance(raw_events, list):
+            return None
+        rows = cast("list[object]", raw_events)
+
+        events: dict[int, ScheduleEventData] = {}
+        for position, raw_event in enumerate(rows):
+            if not isinstance(raw_event, dict):
+                continue
+            row = cast("dict[str, object]", raw_event)
+            event_id = row.get("ID")
+            enabled = row.get("Enabled")
+            if (
+                type(event_id) is not int
+                or event_id < 0
+                or not isinstance(enabled, bool)
+            ):
+                continue
+            if event_id in events:
+                _LOGGER.debug(
+                    "Ignoring duplicate controller schedule event ID %s", event_id
+                )
+                continue
+            events[event_id] = ActronDataCoordinator._parse_schedule_event(
+                row, event_id, position, enabled=enabled
+            )
+        return {
+            "enabled": scheduler_enabled,
+            "events": events,
+            "events_complete": len(events) == len(rows),
+        }
+
+    @staticmethod
+    def _parse_schedule_event(
+        raw: dict[str, object], event_id: int, position: int, *, enabled: bool
+    ) -> ScheduleEventData:
+        """Keep only supported scalar and array values from an event."""
+        event: dict[str, str | int | bool | float | list[bool]] = {
+            "id": event_id,
+            "position": position,
+            "enabled": enabled,
+        }
+        for source, target in (
+            ("Name", "name"),
+            ("Mode", "mode"),
+            ("StartTime", "start_time"),
+            ("EndTime", "end_time"),
+            ("FanMode", "fan_mode"),
+        ):
+            if isinstance(value := raw.get(source), str) and (label := value.strip()):
+                event[target] = label
+        for source, target in (
+            ("DaysOfOperation", "days_of_operation"),
+            ("EnabledZones", "enabled_zones"),
+        ):
+            value = raw.get(source)
+            if isinstance(value, list) and all(
+                isinstance(item, bool) for item in cast("list[object]", value)
+            ):
+                event[target] = cast("list[bool]", value).copy()
+        for source, target in (
+            ("TemperatureSetpoint_Cool_oC", "setpoint_cool"),
+            ("TemperatureSetpoint_Heat_oC", "setpoint_heat"),
+        ):
+            with contextlib.suppress(OverflowError):
+                setpoint = _as_float(raw.get(source))
+                if setpoint is not None and isfinite(setpoint):
+                    event[target] = setpoint
+        return cast("ScheduleEventData", event)
 
     async def _parse_main_data(self, data_sections: dict[str, Any]) -> MainData:
         """
@@ -1861,6 +1949,34 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
     async def set_away_mode(self, *, state: bool) -> None:
         """Set away mode."""
         await self.api.set_away_mode(state=state)
+        await self._async_refresh_after_command()
+
+    async def async_set_schedule_enabled(self, *, enabled: bool) -> None:
+        """Set the controller scheduler and refresh its reported state."""
+        if not self.last_update_success or not self.data or "schedule" not in self.data:
+            msg = "Controller schedule data is unavailable"
+            raise HomeAssistantError(msg)
+        await self.api.set_schedule_enabled(self.device_id, enabled=enabled)
+        await self._async_refresh_after_command()
+
+    async def async_set_schedule_event_enabled(
+        self, event_id: int, *, enabled: bool
+    ) -> None:
+        """Set an event only when its ID and position identify the same row."""
+        schedule = self.data.get("schedule") if self.data else None
+        if (
+            not self.last_update_success
+            or schedule is None
+            or (event := schedule["events"].get(event_id)) is None
+        ):
+            msg = "Controller schedule event is unavailable"
+            raise HomeAssistantError(msg)
+        if event["position"] != event_id or not schedule["events_complete"]:
+            msg = "Controller schedule event cannot be addressed safely"
+            raise HomeAssistantError(msg)
+        await self.api.set_schedule_event_enabled(
+            self.device_id, event["position"], enabled=enabled
+        )
         await self._async_refresh_after_command()
 
     async def set_quiet_mode(self, *, state: bool) -> None:

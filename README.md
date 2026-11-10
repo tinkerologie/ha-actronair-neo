@@ -1,70 +1,126 @@
-# ActronAir Neo Integration for Home Assistant
+# ActronAir Neo for Home Assistant
 
 <!-- BADGES:START -->
 
 [![Marketplace and HACS](https://img.shields.io/badge/Marketplace%20%7C%20HACS-Default-orange.svg)](https://www.hacs.xyz/docs/marketplace/)
 [![GitHub Last Commit](https://img.shields.io/github/last-commit/tinkerologie/ha-actronair-neo)](https://github.com/tinkerologie/ha-actronair-neo/commits/main)
 [![GitHub Release](https://img.shields.io/github/v/release/tinkerologie/ha-actronair-neo)](https://github.com/tinkerologie/ha-actronair-neo/releases)
-[![codecov](https://codecov.io/gh/tinkerologie/ha-actronair-neo/graph/badge.svg)](https://codecov.io/gh/tinkerologie/ha-actronair-neo)
+[![Code coverage](https://codecov.io/gh/tinkerologie/ha-actronair-neo/graph/badge.svg)](https://codecov.io/gh/tinkerologie/ha-actronair-neo)
 [![License](https://img.shields.io/github/license/tinkerologie/ha-actronair-neo)](./LICENSE)
 
 <!-- BADGES:END -->
 
-The ActronAir Neo Integration enables seamless control and monitoring of your ActronAir Neo air conditioning system directly from Home Assistant. With this integration, you can automate climate control, monitor indoor and outdoor temperatures, and adjust settings based on real-time data, all from one central location.
+Control and monitor your ActronAir Neo air conditioner from Home Assistant.
+Set the temperature, select a mode, and control the zones that your system supports.
+Use the entities in dashboards and automations.
 
-## Features
+The integration gets updates from the ActronAir cloud through MQTT.
+If MQTT is unavailable, the integration polls the cloud every 30 seconds by default.
+The integration also supports Que outdoor units with Neo controllers.
 
-- **Comprehensive Control**: Switch between modes (heat, cool, fan, auto), set temperatures, and adjust fan speeds.
-- **Real-time Monitoring**: Indoor/outdoor temperature, humidity, compressor state, and system diagnostics.
-- **Zone Control**: Manage individual zones — enable/disable, set temperatures, and adjust damper positions via cover entities.
-- **Extended Controls**: Turbo mode, quiet mode, away mode, after-hours scheduling, and continuous fan.
-- **Que-to-Neo Support**: Systems with Que outdoor units upgraded to Neo controllers are automatically detected and routed correctly.
-- **Automation Friendly**: Integrate ActronAir Neo into your Home Assistant automations for optimal comfort.
-- **Periodic Updates**: System state refreshes every 30 seconds via cloud polling.
+## Install
 
-## Installation
+You need Home Assistant 2026.11.0 or later and an ActronAir account with access to your system.
 
-### HACS (Recommended)
+### Install with HACS
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tinkerologie&repository=ha-actronair-neo&category=integration)
+[![Open ActronAir Neo in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tinkerologie&repository=ha-actronair-neo&category=integration)
 
-### Manual
-
-1. Download `actronair_neo.zip` and `SHA256SUMS` from the [latest release](https://github.com/tinkerologie/ha-actronair-neo/releases/latest).
-2. Create `config/custom_components/actronair_neo/` and extract the ZIP into that directory. Its files, including `manifest.json`, belong directly there.
+1. Open the ActronAir Neo repository in HACS.
+2. Download the integration.
 3. Restart Home Assistant.
 
-For a source checkout, copy `custom_components/actronair_neo/` into your Home Assistant `config/custom_components/` directory instead, then restart.
+Use a release that includes the `actronair_neo.zip` asset. Some older releases do not have this asset.
+
+### Install manually
+
+1. Download `actronair_neo.zip` and `SHA256SUMS` from the [latest release](https://github.com/tinkerologie/ha-actronair-neo/releases/latest).
+2. [Verify the download](#verify-the-download).
+3. In your Home Assistant configuration directory, create `custom_components/actronair_neo/`.
+4. Extract the ZIP file into the `actronair_neo` directory.
+5. Make sure that `manifest.json` is directly in the `actronair_neo` directory.
+6. Restart Home Assistant.
 
 #### Verify the download
 
-Run these commands in the directory containing the downloaded ZIP and checksum file. Replace `<tag>` with the release version:
+Open a terminal in the directory that contains the two files.
+Replace `TAG` with the release tag in the last command.
+Use GitHub CLI 2.81.0 or later to verify the release asset.
 
 ```sh
 sha256sum -c SHA256SUMS
 gh attestation verify actronair_neo.zip --repo tinkerologie/ha-actronair-neo
-gh release verify-asset <tag> actronair_neo.zip --repo tinkerologie/ha-actronair-neo
+gh release verify-asset TAG actronair_neo.zip --repo tinkerologie/ha-actronair-neo
 ```
 
-The release-asset verification command requires GitHub CLI 2.81.0 or later.
+## Set up the integration
 
-In HACS or the Marketplace, selecting an older release without an `actronair_neo.zip` asset can fail to download.
+1. In Home Assistant, go to **Settings** → **Devices & services** → **Integrations**.
+2. Select **Add integration**.
+3. Search for **ActronAir Neo**.
+4. Select **ActronAir Neo**.
+5. Open the verification URL in your browser.
+6. Sign in to ActronAir.
+7. Enter the device code if the browser does not fill it in.
+8. Authorize Home Assistant.
+9. If your account has more than one system, select the system to add.
+
+The integration uses OAuth 2.0 Device Authorization Grant (RFC 8628).
+Enter your ActronAir credentials on the ActronAir website only.
+
+### Options
+
+| Option                                         | Effect                                                      |
+| ---------------------------------------------- | ----------------------------------------------------------- |
+| **Enable zone control**                        | Adds climate entities for individual zones. Off by default. |
+| **Enable realtime push updates (recommended)** | Gets cloud updates through MQTT. On by default.             |
+
+## Entities
+
+Your system model and settings determine which entities are available.
+
+| Platform          | Controls and readings                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| **Climate**       | System mode, fan speed, and temperature setpoint                                        |
+| **Sensor**        | Temperature, humidity, compressor state, power, estimated energy, and service reminders |
+| **Binary sensor** | Filter status, system health, defrost, fast heating, and active warnings                |
+| **Switch**        | Zones, away mode, quiet mode, continuous fan, turbo mode, and after hours               |
+| **Cover**         | Zone damper position and airflow controls on supported systems                          |
+| **Number**        | After-hours duration and zone temperature limits                                        |
+
+### Controller schedules
+
+On systems that report controller schedules, **Scheduler** shows if the scheduler is on.
+Each schedule has a switch with the name from the controller.
+If you change the name on the controller, the switch keeps the same entity ID.
+Schedule switches show available settings such as times, days, modes, and setpoints.
+
+Use **Scheduler** to pause or resume all controller schedules.
+Use a schedule switch to enable or disable one schedule.
+Schedule commands are pending confirmation on live hardware.
+If a switch does not change, check the schedule in the ActronAir app or on the wall controller.
 
 ## Dashboard cards
 
-Three cards are bundled with the integration and appear in Home Assistant's card picker:
+| Card                      | Controls and readings                                                     |
+| ------------------------- | ------------------------------------------------------------------------- |
+| **ActronAir Neo climate** | Temperature, system mode, fan speed, power, and supported system controls |
+| **ActronAir Neo zones**   | Zone switches, temperature, humidity, setpoints, and YourZone controls    |
+| **ActronAir Neo system**  | Indoor and outdoor readings, compressor power, and estimated energy       |
 
-| Card                      | Controls and readings                                                                                          |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **ActronAir Neo climate** | Neo-style temperature ring, accessible temperature buttons, mode, fan speed, power and supported quick options |
-| **ActronAir Neo zones**   | Zone on/off, temperature and humidity, optional zone setpoints and YourZone airflow controls                   |
-| **ActronAir Neo system**  | Indoor/outdoor readings, compressor power, estimated compressor energy and optional diagnostics                |
+1. Open the dashboard editor.
+2. Add an ActronAir Neo card from the card picker.
+3. Select the **ActronAir Neo device** for the card.
 
-Add a card in the dashboard editor and select your **ActronAir Neo device**. Each card discovers only that device's loaded, readable entities. Entity renaming is supported; multiple systems remain separate. Disabled sensors are omitted. Enable optional sensors on the integration's device page to show their readings.
+A card uses the available entities for the selected device.
+To show a disabled sensor, enable it on the device page.
+Use the temperature buttons or the keyboard to change a setpoint.
+The zone card shows the airflow setpoint separately from the damper position.
 
-The cards follow the selected Home Assistant theme and work in Sections and masonry views. The ring is a visual indicator; use the temperature buttons or your keyboard to change a setpoint. Unsupported controls are hidden, unavailable controls are disabled, and commands show pending/error feedback. Zone controls do not change the system's HVAC mode. Damper position and the commanded airflow setpoint are shown separately; position-only sensors remain read-only. Compressor energy is an estimate derived from compressor power.
+### YAML dashboards
 
-In storage mode, the integration registers one versioned module resource automatically. Reload the browser after an upgrade. YAML dashboards can explicitly register this module resource:
+Home Assistant registers the card resource automatically in storage mode.
+If you manage resources in YAML, add this resource.
 
 ```yaml
 lovelace:
@@ -74,7 +130,10 @@ lovelace:
       type: module
 ```
 
-For manually managed resources, add or update a `?v=<installed-version>` query after an upgrade to refresh browser caches. Card YAML is also supported:
+For manually managed resources, update the `?v=<installed-version>` URL query after an upgrade.
+Reload the browser.
+
+This example adds a climate card.
 
 ```yaml
 type: custom:actronair-neo-climate-card
@@ -83,84 +142,26 @@ show_options: true
 show_humidity: true
 ```
 
-Use `custom:actronair-neo-zones-card` with `show_dampers` and `show_humidity`, or `custom:actronair-neo-status-card` with `show_diagnostics`. Each card accepts an optional `title`.
+| Other card types                   | Options                         |
+| ---------------------------------- | ------------------------------- |
+| `custom:actronair-neo-zones-card`  | `show_dampers`, `show_humidity` |
+| `custom:actronair-neo-status-card` | `show_diagnostics`              |
 
-## Configuration
+You can set a `title` on each card.
 
-1. In Home Assistant, go to **Settings → Devices & Services → Integrations**.
-2. Click **+ ADD INTEGRATION** and search for "ActronAir Neo".
-3. A device code and verification URL will be displayed.
-4. Open the URL in your browser, enter the code, and authorize.
-5. Select your AC system if you have multiple devices.
+## Troubleshoot
 
-> **Note:** This integration uses OAuth2 Device Code Flow (RFC 8628). No username or password is entered in Home Assistant.
+1. Check that the ActronAir app can connect to your system.
+2. Check **Settings** → **System** → **Logs** for ActronAir Neo errors.
+3. If the problem continues, [open a GitHub issue](https://github.com/tinkerologie/ha-actronair-neo/issues/new/choose).
+4. Before you attach diagnostics, remove any private information.
 
-## Usage
+## Contribute
 
-After setup, your ActronAir Neo system will appear as a climate entity in Home Assistant. You can control it from the Home Assistant frontend or include it in your automations.
-
-## Entities
-
-| Platform          | Examples                                                                                      |
-| ----------------- | --------------------------------------------------------------------------------------------- |
-| **Climate**       | Main HVAC control (mode, fan speed, temperature setpoint)                                     |
-| **Sensor**        | Indoor/outdoor temperature, humidity, compressor state, performance metrics, service reminder |
-| **Binary Sensor** | Filter status, system health, defrost, fast heating, active warnings                          |
-| **Switch**        | Zone toggles, away mode, quiet mode, continuous fan, turbo mode, after hours                  |
-| **Cover**         | Zone damper position (open/close/set position)                                                |
-| **Number**        | After-hours duration, zone temperature limits                                                 |
-
-Entities update automatically with the coordinator refresh interval (30 seconds).
-
-## Options
-
-You can adjust the following option in the integration settings:
-
-- **Enable Zone Control**: Toggle individual zone management (off by default).
-
-## Troubleshooting
-
-If you encounter any issues:
-
-1. Check the [Docs](docs/index.md)
-2. Check that your credentials are correct
-3. Ensure your ActronAir Neo system is online and accessible
-4. Check the Home Assistant logs for any error messages
-5. If you encounter a bug, please report it on our [GitHub issues page](https://github.com/tinkerologie/ha-actronair-neo/issues)
-
-## Contributing
-
-Contributions to this integration are welcome. Please fork the repository and submit a pull request with your changes.
-
-### Development Setup
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/tinkerologie/ha-actronair-neo.git
-   cd ha-actronair-neo
-   ```
-
-2. Bootstrap the development environment (requires [uv](https://docs.astral.sh/uv/)):
-
-   ```bash
-   script/setup/setup
-   ```
-
-   Or manually:
-
-   ```bash
-   uv sync --all-groups
-   ```
-
-### Testing
-
-We encourage adding tests for new features. The test suite can be found in the `tests/` directory.
+Read the [contribution guide](./CONTRIBUTING.md) for setup and test procedures.
+See the [changelog](./CHANGELOG.md) for changes in each release.
 
 ## License
 
-This integration is released under the Apache License 2.0.
-
-## Disclaimer
-
-This integration is not officially associated with or endorsed by ActronAir. ActronAir trademarks belong to ActronAir, and this integration is independently developed.
+The integration uses the [Apache License 2.0](./LICENSE).
+Independent contributors maintain this integration. ActronAir owns its trademarks.

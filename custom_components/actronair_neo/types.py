@@ -191,6 +191,31 @@ class VFTData(TypedDict):
     airflow: float
 
 
+class ScheduleEventData(TypedDict):
+    """One controller schedule event."""
+
+    id: int
+    position: int
+    enabled: bool
+    name: NotRequired[str]
+    mode: NotRequired[str]
+    start_time: NotRequired[str]
+    end_time: NotRequired[str]
+    days_of_operation: NotRequired[list[bool]]
+    enabled_zones: NotRequired[list[bool]]
+    fan_mode: NotRequired[str]
+    setpoint_cool: NotRequired[float]
+    setpoint_heat: NotRequired[float]
+
+
+class ScheduleData(TypedDict):
+    """Controller scheduler state and events keyed by their IDs."""
+
+    enabled: bool
+    events: dict[int, ScheduleEventData]
+    events_complete: bool
+
+
 class CoordinatorData(TypedDict):
     """Data structure for coordinator."""
 
@@ -203,6 +228,7 @@ class CoordinatorData(TypedDict):
     servicing: ServicingData
     connection_meta: ConnectionMetadata
     vft: VFTData
+    schedule: NotRequired[ScheduleData]
 
 
 class MasterSensorInfo(TypedDict):
@@ -239,6 +265,7 @@ class LastKnownState(TypedDict):
     RemoteZoneInfo: list[dict[str, str | int | bool | float]]
     AirconSystem: dict[str, str | int | bool | dict[str, Any] | list[dict[str, Any]]]
     Alerts: dict[str, bool]
+    NV_Schedule: NotRequired[dict[str, Any]]
 
 
 class AcStatusResponse(TypedDict):

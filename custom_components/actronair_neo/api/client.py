@@ -737,8 +737,8 @@ class ActronAirNeoApiClient:
         """
         Map a command type and its parameters to a settings payload.
 
-        Returns the ``UserAirconSettings``/``RemoteZoneInfo`` path→value pairs for
-        the command; ``create_command`` adds the ``type`` marker and wrapper.
+        Return the path/value pairs for the command. ``create_command`` adds
+        the ``type`` marker and wrapper.
         """
         match command_type:
             case "ON":
@@ -761,6 +761,14 @@ class ActronAirNeoApiClient:
                 }
             case "AWAY_MODE":
                 return {"UserAirconSettings.AwayMode": params["state"]}
+            case "SCHEDULE_ENABLED":
+                return {"NV_Schedule.Enabled": params["enabled"]}
+            case "SCHEDULE_EVENT_ENABLED":
+                position = params.get("position")
+                if type(position) is not int or position < 0:
+                    msg = "Schedule event position must be a non-negative integer"
+                    raise ApiError(msg)
+                return {f"NV_Schedule.Events[{position}].Enabled": params["enabled"]}
             case "QUIET_MODE":
                 return {"UserAirconSettings.QuietMode": params["state"]}
             case "SET_ZONE_TEMP":
@@ -1034,6 +1042,20 @@ class ActronAirNeoApiClient:
         """Set away mode."""
         command = self.create_command("AWAY_MODE", state=state)
         await self.send_command(self.actron_serial, command)
+
+    async def set_schedule_enabled(self, serial: str, *, enabled: bool) -> None:
+        """Set the controller scheduler state."""
+        command = self.create_command("SCHEDULE_ENABLED", enabled=enabled)
+        await self.send_command(serial, command)
+
+    async def set_schedule_event_enabled(
+        self, serial: str, position: int, *, enabled: bool
+    ) -> None:
+        """Set one controller schedule event by its list position."""
+        command = self.create_command(
+            "SCHEDULE_EVENT_ENABLED", position=position, enabled=enabled
+        )
+        await self.send_command(serial, command)
 
     async def set_quiet_mode(self, *, state: bool) -> None:
         """Set quiet mode."""
