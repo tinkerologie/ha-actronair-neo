@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.11.2] - 2026-11-10
+
 ### Added
 
 - Add a Scheduler switch and a switch for each schedule on supported Neo
