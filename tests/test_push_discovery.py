@@ -26,6 +26,75 @@ def test_field_name_fallbacks_and_defaults():
     assert d.port == 443
     assert d.protocol == "ssl"
     assert d.user_id == "unknown"
+    assert d.opt_out_of_logging is True
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_logging_preference_preserves_cloud_boolean(value):
+    details = RealtimeConnectionDetails.from_payload(
+        {"Endpoint": "mqtt.example", "OptOutOfLogging": value}
+    )
+    assert details is not None
+    assert details.opt_out_of_logging is value
+
+
+@pytest.mark.parametrize("envelope", ["RTCDetails", "rtcDetails"])
+def test_logging_preference_reads_alias_inside_envelope(envelope):
+    details = RealtimeConnectionDetails.from_payload(
+        {envelope: {"Endpoint": "mqtt.example", "optOutOfLogging": False}}
+    )
+    assert details is not None
+    assert details.opt_out_of_logging is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [1, 0, 2, "true", "false", "yes", "off", "garbage", "", "  ", None, [], {}],
+)
+def test_malformed_logging_preference_preserves_discovery_and_opts_out(value):
+    details = RealtimeConnectionDetails.from_payload(
+        {
+            "Endpoint": "mqtt.example",
+            "Port": 8883,
+            "UserId": "u1",
+            "OptOutOfLogging": value,
+        }
+    )
+    assert details is not None
+    assert (details.endpoint, details.port, details.user_id) == (
+        "mqtt.example",
+        8883,
+        "u1",
+    )
+    assert details.opt_out_of_logging is True
+
+
+def test_malformed_primary_logging_alias_takes_precedence():
+    details = RealtimeConnectionDetails.from_payload(
+        {
+            "Endpoint": "mqtt.example",
+            "OptOutOfLogging": "false",
+            "optOutOfLogging": False,
+        }
+    )
+    assert details is not None
+    assert details.opt_out_of_logging is True
+
+
+@pytest.mark.parametrize(("value", "expected"), [(False, False), ("false", True)])
+def test_logging_preference_validated_when_constructed_directly(value, expected):
+    details = RealtimeConnectionDetails(
+        endpoint="mqtt.example", opt_out_of_logging=value
+    )
+    assert details.opt_out_of_logging is expected
+
+
+@pytest.mark.parametrize(("value", "expected"), [(False, False), ("false", True)])
+def test_logging_preference_validated_by_model_validate(value, expected):
+    details = RealtimeConnectionDetails.model_validate(
+        {"Endpoint": "mqtt.example", "OptOutOfLogging": value}
+    )
+    assert details.opt_out_of_logging is expected
 
 
 def test_non_numeric_port_defaults_to_443():

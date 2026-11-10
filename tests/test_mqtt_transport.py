@@ -434,8 +434,23 @@ class _PublishRecorder:
 
 
 @pytest.mark.asyncio
-async def test_request_full_status_publishes_get_all_with_default_prefix():
-    t = _transport(AsyncMock())
+@pytest.mark.parametrize(
+    ("flag", "expected"), [(None, True), (True, True), (False, False)]
+)
+async def test_request_full_status_publishes_get_all_with_discovered_preference(
+    flag, expected
+):
+    details = (
+        DETAILS
+        if flag is None
+        else DETAILS.model_copy(update={"opt_out_of_logging": flag})
+    )
+    t = MqttPushTransport(
+        details=details,
+        serial="SER1",
+        token_provider=AsyncMock(return_value="tok"),
+        on_update=AsyncMock(),
+    )
     client = _PublishRecorder()
     await t._request_full_status(client)
     assert len(client.calls) == 1
@@ -444,7 +459,55 @@ async def test_request_full_status_publishes_get_all_with_default_prefix():
     body = json.loads(payload)
     assert body["command"] == {"type": "getAll"}
     assert body["correlationId"].startswith("HA/")
-    assert body["OptOutOfLogging"] is False
+    assert body["OptOutOfLogging"] is expected
+
+
+@pytest.mark.asyncio
+async def test_start_publishes_cloud_opt_out_after_subscribing():
+    details = RealtimeConnectionDetails.from_payload(
+        {"Endpoint": "mqtt.example", "UserId": "u1", "OptOutOfLogging": True}
+    )
+    assert details is not None
+    published = asyncio.Event()
+    order: list[tuple[str, str]] = []
+    payloads: list[str] = []
+
+    class Client(_FakeClient):
+        async def subscribe(self, topic: str) -> None:
+            await super().subscribe(topic)
+            order.append(("subscribe", topic))
+
+        async def publish(self, topic: str, *, payload: str) -> None:
+            order.append(("publish", topic))
+            payloads.append(payload)
+            published.set()
+
+    client = Client([])
+    transport = MqttPushTransport(
+        details=details,
+        serial="SER1",
+        token_provider=AsyncMock(return_value="tok"),
+        on_update=AsyncMock(),
+        client_factory=lambda _token: client,
+    )
+    task = asyncio.create_task(transport.start())
+    try:
+        await asyncio.wait_for(published.wait(), timeout=5)
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert order == [
+        ("subscribe", "actron-cloud/u1/neo/SER1/mwc/full-status"),
+        ("subscribe", "actron-cloud/u1/neo/SER1/mwc/status-change"),
+        ("subscribe", "actron-cloud/u1/neo/SER1/mwc/heart-beat"),
+        ("subscribe", "actron-cloud/u1/neo/SER1/mwc/cmd-response/+/+"),
+        ("publish", "actron-cloud/u1/neo/SER1/app/cmd"),
+    ]
+    body = json.loads(payloads[0])
+    assert body["command"] == {"type": "getAll"}
+    assert body["OptOutOfLogging"] is True
 
 
 @pytest.mark.asyncio

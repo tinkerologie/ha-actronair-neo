@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Neo MQTT `getAll` requests now honor the cloud's `OptOutOfLogging` preference.
+  A missing or malformed flag opts out of logging (#241).
+
 - Que (NX Gen) systems again treat a zero `NV_Limits` signed variance as a real limit that holds that side of the zone at the master setpoint, as in 2026.10.0 and in the upstream library. Since 2026.10.1 (#174) a zero was read as "no limit" on every platform, so such a zone could be set as far as the system limit. Neo systems, which publish these keys as an unused `0.0`, keep the 2026.10.1 fall-through to the zone variance (#238).
 
 ## [2026.11.1] - 2026-11-05
