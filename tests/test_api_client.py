@@ -886,9 +886,10 @@ class TestZoneOperations:
 class TestHvacMethods:
     async def test_set_schedule_enabled_sends_partial_command(self) -> None:
         client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        await client.set_system("SER1")
         client.send_command = AsyncMock()
 
-        await client.set_schedule_enabled("SER1", enabled=True)
+        await client.set_schedule_enabled(enabled=True)
 
         client.send_command.assert_awaited_once_with(
             "SER1", {"command": {"type": "set-settings", "NV_Schedule.Enabled": True}}
@@ -896,9 +897,10 @@ class TestHvacMethods:
 
     async def test_set_schedule_event_enabled_sends_indexed_command(self) -> None:
         client = ActronAirNeoApiClient(_mock_auth(), _mock_session())
+        await client.set_system("SER1")
         client.send_command = AsyncMock()
 
-        await client.set_schedule_event_enabled("SER1", 2, enabled=False)
+        await client.set_schedule_event_enabled(2, enabled=False)
 
         client.send_command.assert_awaited_once_with(
             "SER1",

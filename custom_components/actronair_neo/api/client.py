@@ -1043,19 +1043,17 @@ class ActronAirNeoApiClient:
         command = self.create_command("AWAY_MODE", state=state)
         await self.send_command(self.actron_serial, command)
 
-    async def set_schedule_enabled(self, serial: str, *, enabled: bool) -> None:
+    async def set_schedule_enabled(self, *, enabled: bool) -> None:
         """Set the controller scheduler state."""
         command = self.create_command("SCHEDULE_ENABLED", enabled=enabled)
-        await self.send_command(serial, command)
+        await self.send_command(self.actron_serial, command)
 
-    async def set_schedule_event_enabled(
-        self, serial: str, position: int, *, enabled: bool
-    ) -> None:
+    async def set_schedule_event_enabled(self, position: int, *, enabled: bool) -> None:
         """Set one controller schedule event by its list position."""
         command = self.create_command(
             "SCHEDULE_EVENT_ENABLED", position=position, enabled=enabled
         )
-        await self.send_command(serial, command)
+        await self.send_command(self.actron_serial, command)
 
     async def set_quiet_mode(self, *, state: bool) -> None:
         """Set quiet mode."""

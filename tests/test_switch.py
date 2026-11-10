@@ -470,8 +470,8 @@ async def test_schedule_push_renames_and_removes_events(
 @pytest.mark.parametrize(
     "target",
     [
-        ("scheduler", "set_schedule_enabled", (MOCK_SERIAL,)),
-        ("schedule_event_0", "set_schedule_event_enabled", (MOCK_SERIAL, 0)),
+        ("scheduler", "set_schedule_enabled", ()),
+        ("schedule_event_0", "set_schedule_event_enabled", (0,)),
     ],
 )
 async def test_schedule_switches_write_and_refresh(

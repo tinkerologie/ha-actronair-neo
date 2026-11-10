@@ -1951,17 +1951,15 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         await self.api.set_away_mode(state=state)
         await self._async_refresh_after_command()
 
-    async def async_set_schedule_enabled(self, *, enabled: bool) -> None:
+    async def set_schedule_enabled(self, *, enabled: bool) -> None:
         """Set the controller scheduler and refresh its reported state."""
         if not self.last_update_success or not self.data or "schedule" not in self.data:
             msg = "Controller schedule data is unavailable"
             raise HomeAssistantError(msg)
-        await self.api.set_schedule_enabled(self.device_id, enabled=enabled)
+        await self.api.set_schedule_enabled(enabled=enabled)
         await self._async_refresh_after_command()
 
-    async def async_set_schedule_event_enabled(
-        self, event_id: int, *, enabled: bool
-    ) -> None:
+    async def set_schedule_event_enabled(self, event_id: int, *, enabled: bool) -> None:
         """Set an event only when its ID and position identify the same row."""
         schedule = self.data.get("schedule") if self.data else None
         if (
@@ -1974,9 +1972,7 @@ class ActronDataCoordinator(DataUpdateCoordinator["CoordinatorData"]):
         if event["position"] != event_id or not schedule["events_complete"]:
             msg = "Controller schedule event cannot be addressed safely"
             raise HomeAssistantError(msg)
-        await self.api.set_schedule_event_enabled(
-            self.device_id, event["position"], enabled=enabled
-        )
+        await self.api.set_schedule_event_enabled(event["position"], enabled=enabled)
         await self._async_refresh_after_command()
 
     async def set_quiet_mode(self, *, state: bool) -> None:

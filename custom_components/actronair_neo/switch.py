@@ -151,11 +151,11 @@ class ActronSchedulerSwitch(ActronAirNeoEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Enable the scheduler."""
-        await self.coordinator.async_set_schedule_enabled(enabled=True)
+        await self.coordinator.set_schedule_enabled(enabled=True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Disable the scheduler."""
-        await self.coordinator.async_set_schedule_enabled(enabled=False)
+        await self.coordinator.set_schedule_enabled(enabled=False)
 
 
 class ActronScheduleEventSwitch(ActronAirNeoEntity, SwitchEntity):
@@ -216,15 +216,11 @@ class ActronScheduleEventSwitch(ActronAirNeoEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Enable this event."""
-        await self.coordinator.async_set_schedule_event_enabled(
-            self._event_id, enabled=True
-        )
+        await self.coordinator.set_schedule_event_enabled(self._event_id, enabled=True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:  # noqa: ARG002
         """Disable this event."""
-        await self.coordinator.async_set_schedule_event_enabled(
-            self._event_id, enabled=False
-        )
+        await self.coordinator.set_schedule_event_enabled(self._event_id, enabled=False)
 
 
 class ActronAwayModeSwitch(ActronAirNeoEntity, SwitchEntity):
