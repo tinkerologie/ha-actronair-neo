@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   build:
+    timeout-minutes: 60
     name: Build and attest
     runs-on: ubuntu-latest
     permissions:
@@ -150,6 +151,7 @@ jobs:
           retention-days: 7
 
   publish:
+    timeout-minutes: 60
     name: Verify and publish
     needs: build
     if: needs.build.outputs.should_release == 'true'

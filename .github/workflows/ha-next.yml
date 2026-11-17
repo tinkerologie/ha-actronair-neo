@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   check:
+    timeout-minutes: 10
     name: Check (${{ matrix.channel }})
     runs-on: ubuntu-latest
     strategy:
@@ -129,6 +130,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          retention-days: 7
           name: ha-next-${{ matrix.channel }}
           path: result.json
           if-no-files-found: error
@@ -142,6 +144,7 @@ jobs:
           PY
 
   report:
+    timeout-minutes: 10
     name: Report (${{ matrix.channel }})
     needs: check
     if: always()

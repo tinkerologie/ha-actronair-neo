@@ -21,6 +21,7 @@ env:
 
 jobs:
   lint:
+    timeout-minutes: 30
     name: Lint
     runs-on: ubuntu-latest
     steps:
@@ -41,6 +42,7 @@ jobs:
         run: uv run --frozen --no-sync ruff check --output-format=github .
 
   test:
+    timeout-minutes: 30
     name: Test
     runs-on: ubuntu-latest
     steps:
@@ -58,6 +60,7 @@ jobs:
         run: uv run --frozen --no-sync pytest --cov=custom_components/actronair_neo --cov-report=term-missing
 
   package:
+    timeout-minutes: 30
     name: Reproducible release ZIP
     runs-on: ubuntu-latest
     steps:
@@ -77,6 +80,7 @@ jobs:
           cmp dist/first/SHA256SUMS dist/second/SHA256SUMS
 
   frontend:
+    timeout-minutes: 30
     name: Dashboard cards
     runs-on: ubuntu-latest
     steps:
